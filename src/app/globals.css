@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/**
+ * Agent Hub — a serious, minimal, developer-focused theme. Deliberately NOT the old "Buddy" suite's
+ * mascot/sticker/manga styling: no hand-drawn shadows, no halftone textures, no cutesy accents. Just a
+ * clean IDE-adjacent palette (near-black/near-white + one violet accent), system fonts, and a subtle
+ * dot-grid background that reads as "developer tool" rather than "consumer app."
+ */
+@theme {
+  --color-bg: #f6f6f8;
+  --color-surface: #ffffff;
+  --color-border: #e2e2e8;
+  --color-ink: #0b0b0f;
+  --color-muted: #5b5b68;
+  --color-accent: #6d28d9;
+  --color-accent-strong: #5b21b6;
+  --color-accent-soft: #ede9fe;
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+}
+
+/* Dark mode: explicit `data-theme="dark"` (set by ThemeToggle) always wins; otherwise honor the OS
+   preference for a first-time visitor. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #08080b;
+    --color-surface: #121216;
+    --color-border: #232329;
+    --color-ink: #eeeef1;
+    --color-muted: #93939f;
+    --color-accent: #a78bfa;
+    --color-accent-strong: #c4b5fd;
+    --color-accent-soft: #1f1a33;
+  }
+}
+:root[data-theme="dark"] {
+  --color-bg: #08080b;
+  --color-surface: #121216;
+  --color-border: #232329;
+  --color-ink: #eeeef1;
+  --color-muted: #93939f;
+  --color-accent: #a78bfa;
+  --color-accent-strong: #c4b5fd;
+  --color-accent-soft: #1f1a33;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  position: relative;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Faint fixed dot-grid — a developer-tool cue, not decoration for its own sake. Opacity is low enough
+   to disappear under content but reads at the edges. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.6;
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-semibold text-[var(--color-ink)] transition-colors hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-border)]/40 hover:text-[var(--color-ink)];
+  }
+  .card {
+    @apply rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)];
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-muted)];
+  }
+}
