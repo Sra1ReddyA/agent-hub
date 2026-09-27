@@ -1,13 +1,48 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { STACKS, type StackId } from "@/lib/agent-hub/stacks";
 import { DEFAULT_MODE, DEFAULT_TARGETS, type GenerationMode } from "@/lib/agent-hub/generator";
 import { TARGETS, type TargetId } from "@/lib/agent-hub/targets";
 import { buildShareUrl, readShareConfig } from "@/lib/agent-hub/share-config";
+import { CHANGELOG, TEMPLATE_CONTENT_VERSION } from "@/lib/agent-hub/version";
 import { TechSelector } from "./TechSelector";
 import { OutputPreview } from "./OutputPreview";
 import { ManifestDetector } from "./ManifestDetector";
+
+const LAST_DOWNLOAD_VERSION_KEY = "agent-hub-last-download-version";
+
+/** Compares two "x.y.z" content versions. Returns true if `a` is strictly older than `b`. Deliberately
+ * simple (no pre-release/build-metadata handling) since this only ever compares against our own
+ * `TEMPLATE_CONTENT_VERSION`, which is always a plain three-part version. */
+function isOlder(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na !== nb) return na < nb;
+  }
+  return false;
+}
+
+/** Reads what content version (if any) this browser last downloaded a bundle from — set by
+ * `OutputPreview.tsx`'s `download()`. Never sent anywhere; purely a same-device "is this stale" check. */
+function useStaleBundleBanner() {
+  const [lastVersion, setLastVersion] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    try {
+      setLastVersion(localStorage.getItem(LAST_DOWNLOAD_VERSION_KEY));
+    } catch {}
+  }, []);
+
+  const isStale = Boolean(lastVersion) && isOlder(lastVersion!, TEMPLATE_CONTENT_VERSION);
+
+  return { isStale, lastVersion, dismissed, dismiss: () => setDismissed(true) };
+}
 
 const STACKS_STORAGE_KEY = "agent-hub-selected-stacks";
 const MODE_STORAGE_KEY = "agent-hub-mode";
@@ -154,8 +189,28 @@ export function AgentHub() {
     [stackIds, mode, targetIds, customRules, includeCiCheck],
   );
 
+  const { isStale, lastVersion, dismissed, dismiss } = useStaleBundleBanner();
+  const contentChangesSince = CHANGELOG.filter((c) => c.contentChange && lastVersion && isOlder(lastVersion, c.version));
+
   return (
     <div className="space-y-6">
+      {isStale && !dismissed && (
+        <div className="card flex flex-wrap items-center justify-between gap-3 border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] p-4">
+          <p className="text-sm text-[var(--color-ink)]">
+            The bundle you last downloaded (v{lastVersion}) is behind the current guardrails (v{TEMPLATE_CONTENT_VERSION}) —{" "}
+            {contentChangesSince.length} update{contentChangesSince.length === 1 ? "" : "s"} since then. Regenerate below to pick them up.
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <Link href="/changelog" className="btn-ghost !px-3 text-sm">
+              See what changed
+            </Link>
+            <button type="button" onClick={dismiss} className="btn-ghost !px-3 text-sm" aria-label="Dismiss">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       <ManifestDetector onDetect={mergeStacks} />
 
       <div className="card p-5">

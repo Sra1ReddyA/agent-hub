@@ -13,6 +13,12 @@ export function SiteHeader() {
           <Link href="/guides" className="btn-ghost !px-3">
             Guides
           </Link>
+          <Link href="/changelog" className="btn-ghost !px-3">
+            Changelog
+          </Link>
+          <Link href="/sync" className="btn-ghost !px-3">
+            Sync
+          </Link>
           <span className="pill hidden lg:inline-flex">No sign-up · Runs in your browser</span>
           <ThemeToggle />
         </nav>

@@ -7,6 +7,7 @@ import {
   SELF_VERIFICATION_LOOP_MD,
   UNIVERSAL_GUARDRAILS_MD,
 } from "./universalGuardrails";
+import { versionFooter } from "../version";
 
 /**
  * Builds the Master Agent Markdown body — for one stack (`buildMasterAgent`) or for a whole selected
@@ -274,6 +275,8 @@ ${END_OF_SESSION_REPORTING_MD}
 6. Update \`README.md\` to reflect what changed — every time, without being asked (Directive 10).
 7. Run the Verification Workflow above before calling any change done.
 8. Close every response with the Task Summary & Application Impact table above.
+
+${versionFooter()}
 `;
 }
 
@@ -382,6 +385,8 @@ ${END_OF_SESSION_REPORTING_MD}
 8. Run the Verification Workflow above — for whichever stack(s) the change actually touched — before
    calling any change done.
 9. Close every response with the Task Summary & Application Impact table above.
+
+${versionFooter()}
 `;
 }
 
@@ -395,7 +400,7 @@ export function buildSharedIndexBody(stacks: Stack[], customRules?: string): str
   const crossStackSection = renderCrossStackSection(stacks, label);
   const customSection = renderCustomRulesSection(customRules);
 
-  return [crossStackSection, customSection, UNIVERSAL_GUARDRAILS_MD, OPERATIONAL_GUARDRAILS_MD, GIT_WORKFLOW_MD, END_OF_SESSION_REPORTING_MD]
+  return [crossStackSection, customSection, UNIVERSAL_GUARDRAILS_MD, OPERATIONAL_GUARDRAILS_MD, GIT_WORKFLOW_MD, END_OF_SESSION_REPORTING_MD, versionFooter()]
     .filter(Boolean)
     .join("\n\n");
 }

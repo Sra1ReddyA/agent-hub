@@ -34,6 +34,7 @@ is nothing to wait for and nothing that can hallucinate.
   - [Static export (no server needed)](#static-export-no-server-needed)
 - [Environment variables](#environment-variables)
 - [Admin dashboard & usage analytics](#admin-dashboard--usage-analytics)
+- [Agent Hub Sync — keep generated files current automatically](#agent-hub-sync--keep-generated-files-current-automatically)
 - [Extending Agent Hub](#extending-agent-hub)
   - [Add a new stack](#add-a-new-stack)
   - [Add a new target (AI coding tool)](#add-a-new-target-ai-coding-tool)
@@ -419,10 +420,12 @@ itself; the rest are entirely optional and only affect the `/admin` dashboard (s
 |---|---|---|
 | `NEXT_PUBLIC_SITE_URL` | No (defaults to `http://localhost:3000`) | Used to build canonical URLs, Open Graph/Twitter metadata and JSON-LD structured data. Set this to your real production domain once deployed. |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | No — required only to open `/admin` | HTTP Basic Auth credentials for the admin dashboard, checked in `src/proxy.ts`. Pick your own values; without both set, `/admin` returns a 503 and the rest of the app is unaffected. |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | No | Durable storage for `/admin`'s analytics. Without these, analytics still works via an in-memory fallback (fine for local dev, not for production — see [Admin dashboard & usage analytics](#admin-dashboard--usage-analytics)). |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | No | Durable storage for `/admin`'s analytics **and** for Agent Hub Sync (below). Without these, `/admin` falls back to an in-memory store; Agent Hub Sync has no fallback and simply won't run. |
+| `GITHUB_APP_ID` / `GITHUB_APP_SLUG` / `GITHUB_APP_WEBHOOK_SECRET` / `GITHUB_APP_PRIVATE_KEY` | No | Credentials for Agent Hub Sync's GitHub App. Get these from `/sync`, not by hand — see [Agent Hub Sync](#agent-hub-sync--keep-generated-files-current-automatically). |
+| `CRON_SECRET` | No | Any random string. Authenticates Vercel's daily cron hit to `/api/cron/resync` (see `vercel.json`'s `crons` entry). |
 
 The generator itself still needs no API key, database, or secret of any kind — everything above is opt-in
-infrastructure for the site owner's own analytics, not for the generator to function.
+infrastructure for the site owner's own analytics and sync automation, not for the generator to function.
 
 ## Admin dashboard & usage analytics
 
@@ -455,6 +458,46 @@ to the visitor's own repository.
 
 There's exactly one admin account by design — see the doc comment in `src/proxy.ts` for why Basic
 Auth is the right amount of complexity here, and what to reach for instead if you ever need more than one.
+
+## Agent Hub Sync — keep generated files current automatically
+
+Every file this project generates is stamped with the content version it came from (`src/lib/agent-hub/version.ts`),
+and the homepage shows a banner if what you last downloaded has fallen behind. **Agent Hub Sync** is the
+next step past that banner: an optional GitHub App that watches a repository directly and opens a pull
+request — never a push to your default branch — when either your dependencies change (a new stack detected
+in `package.json`/`requirements.txt`/etc.) or Agent Hub's own guardrail content moves to a new version.
+
+**How it decides to act.** `src/lib/github-app/sync.ts`'s `syncRepo()` is the whole feature in one function:
+re-detect the repo's stack from its root-level manifests, rebuild the bundle against the current template
+content, diff it against what's actually committed on the default branch, and — only if something real
+changed — commit to a dedicated `agent-hub-sync` branch (force-updated in place, never a growing pile of
+commits) and open or silently update one PR. It's called from two places: `src/app/api/github/webhook/route.ts`
+on every `push` to the default branch (catches a dependency change), and `src/app/api/cron/resync/route.ts`
+once a day via Vercel Cron (catches a template-content bump on a repo that's gone quiet). Both are no-ops
+whenever nothing's actually changed, so it's safe to call as often as it fires.
+
+**Setup — three steps, all self-service from the site:**
+
+1. Visit **`/sync`** and click "Create your GitHub App." This drives GitHub's own App Manifest flow — a
+   one-screen confirmation on github.com, not a 20-field form — and creates an App scoped to whatever
+   account or org you confirm it under.
+2. The page GitHub redirects you back to (`/api/github/app-manifest/callback`) shows your new App's
+   `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` **once** —
+   GitHub doesn't show the private key or webhook secret again after this. Paste all four into your
+   deployment's env vars, plus a `CRON_SECRET` of your choosing, then redeploy (env var changes need a new
+   build to take effect). Requires `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` too — Sync has no
+   in-memory fallback, since forgetting which repos it's watching on a cold start defeats the point.
+3. Install the App on whichever repos you want kept in sync (the same callback page links straight to the
+   install screen). It opens its first PR within moments — zero config required to start: auto-detected
+   stacks, Combined mode, GitHub Copilot + Claude Code + Cursor. Want something different? Edit the files
+   directly in the PR it opens; your edits are respected on every later sync as long as nothing upstream has
+   changed for that specific file.
+
+**Why "your own App" instead of one shared listing.** Registering your own instance means the bot only ever
+holds the exact repo access you granted it, under your own GitHub account — there's no shared credential
+between different people running this project, and no third party (including whoever's hosting this
+particular deployment) with standing access to your repos. `/sync` has more detail, including what is and
+isn't sent to the server (short answer: a handful of root-level manifest files' contents, nothing else).
 
 ## Extending Agent Hub
 
@@ -500,14 +543,20 @@ agent-hub/
 │   │   ├── page.tsx              # Home page — the generator (stack + target picker, FAQ)
 │   │   ├── guides/page.tsx        # Guides — what the files do, per-tool setup, how to write directives
 │   │   ├── admin/page.tsx         # Password-protected usage analytics dashboard (server component)
+│   │   ├── changelog/page.tsx     # Public history of content-version releases
+│   │   ├── sync/page.tsx          # Agent Hub Sync marketing + 3-step setup page
 │   │   ├── api/track/route.ts     # Records one page view (path + referrer hostname only)
 │   │   ├── api/track-bundle/route.ts # Records one "bundle generated" event (stacks/mode/targets/CI toggle)
+│   │   ├── api/github/webhook/route.ts          # GitHub App webhook: push / installation(_repositories) events
+│   │   ├── api/github/app-manifest/route.ts     # Step 1 of the GitHub App Manifest flow (self-submitting form)
+│   │   ├── api/github/app-manifest/callback/route.ts # Step 2: exchanges the code, shows credentials once
+│   │   ├── api/cron/resync/route.ts             # Vercel Cron target: daily "did guardrails change" sweep
 │   │   ├── layout.tsx             # Root layout, global metadata, theme-flash-free dark mode init, mounts <Analytics />
 │   │   ├── globals.css            # Theme tokens (light/dark), component classes (.btn-*, .card, .pill)
 │   │   ├── robots.ts / sitemap.ts # SEO
 │   │   └── icon.svg
 │   ├── components/
-│   │   ├── AgentHub.tsx           # Orchestrator: persisted state (incl. custom rules, CI toggle), share-link read/write
+│   │   ├── AgentHub.tsx           # Orchestrator: persisted state (incl. custom rules, CI toggle), share-link read/write, stale-bundle banner
 │   │   ├── TechSelector.tsx       # Multi-select stack picker — categorized checkboxes + removable-tag summary
 │   │   ├── ManifestDetector.tsx   # Paste a package.json/requirements.txt/etc. → auto-selects matching stacks
 │   │   ├── OutputPreview.tsx      # Mode toggle, custom rules + CI toggle + share link, tool picker, preview, zip download
@@ -520,6 +569,7 @@ agent-hub/
 │       │   ├── detect.ts          # Manifest-text → matching StackId[] (repo-aware auto-detection)
 │       │   ├── share-config.ts    # Encodes/decodes the full selection into a `?config=` URL for team sharing
 │       │   ├── ci-compliance.ts   # Optional GitHub Actions workflow + guardrail-checking shell script
+│       │   ├── version.ts         # TEMPLATE_CONTENT_VERSION + CHANGELOG; footer embedded in every generated doc
 │       │   ├── targets.ts         # Tool catalogue — file formats/paths, TargetShape, setup guide per tool
 │       │   ├── generator.ts       # Combines stacks + targets + mode + options into a deduplicated file list / zip
 │       │   ├── types.ts           # Shared GeneratedFile type
@@ -527,10 +577,15 @@ agent-hub/
 │       │       ├── masterAgent.ts         # 10-directive template; single-stack and combined-agent builders
 │       │       └── universalGuardrails.ts # Universal Guardrails + Mandatory End-of-Session Reporting text
 │       ├── analytics/store.ts     # Upstash Redis (or in-memory fallback) reads/writes behind /admin
+│       ├── github-app/
+│       │   ├── env.ts             # GitHub App env config + GITHUB_APP_CONFIGURED gate
+│       │   ├── client.ts          # Lazy `@octokit/app` instance; JWT + installation-token auth
+│       │   ├── repoConfigStore.ts # Redis-backed per-repo tracked config (no in-memory fallback)
+│       │   └── sync.ts            # syncRepo(): detect → diff → commit → open/update one PR
 │       └── seo.ts                 # Metadata + JSON-LD helpers
 ├── public/
 ├── Dockerfile
-├── vercel.json
+├── vercel.json                    # Includes the daily `/api/cron/resync` cron entry
 ├── next.config.ts
 └── package.json
 ```

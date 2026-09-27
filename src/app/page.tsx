@@ -46,6 +46,10 @@ const FAQS = [
     a: "The generator itself, no — stack selection, mode, target selection, bundle generation and the zip file are all built entirely in your browser, and your last picks are remembered in your browser's local storage only. The one exception: the site owner records anonymous, aggregate usage — page paths, a bare referrer hostname, and which stacks/tools/mode a generated bundle used — visible only on a password-protected internal dashboard. No file content, no custom team-rules text, no IP address, and no cookie or fingerprinting is ever collected.",
   },
   { q: "Can I edit the generated files afterward?", a: "Yes, and you should. They're a strong, opinionated starting point, not a rulebook carved in stone — trim, extend or reword any directive to match how your team actually works. The Guides page has tips on what's worth customizing first." },
+  {
+    q: "Do the generated files go stale?",
+    a: "Every file we generate is stamped with the content version it came from. AI coding tools change their own conventions constantly, so if you come back after we've shipped new guardrails, you'll see a banner here telling you exactly what changed and offering a one-click regenerate — instead of silently working off a rules file that's fallen behind. See the Changelog page for the full history.",
+  },
 ];
 
 export default function HomePage() {

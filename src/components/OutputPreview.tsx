@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { StackId } from "@/lib/agent-hub/stacks";
 import { buildBundle, buildBundleZip, type GenerationMode, type GeneratedFile } from "@/lib/agent-hub/generator";
 import { TARGETS, type TargetId } from "@/lib/agent-hub/targets";
+import { TEMPLATE_CONTENT_VERSION } from "@/lib/agent-hub/version";
 
 function DownloadIcon() {
   return (
@@ -189,6 +190,12 @@ export function OutputPreview({
       const { saveAs } = await import("file-saver");
       const name = stackIds.length <= 3 ? stackIds.join("-") : "fullstack";
       saveAs(blob, `${name}-agent-bundle.zip`);
+      // Stamp the content version this download came from, purely in this browser's localStorage, so a
+      // later visit can tell you "the guardrails you downloaded are now behind" (see AgentHub.tsx). Never
+      // sent anywhere — this is the same-device staleness check, not a tracking signal.
+      try {
+        localStorage.setItem("agent-hub-last-download-version", TEMPLATE_CONTENT_VERSION);
+      } catch {}
       // Best-effort usage signal for the /admin dashboard — never awaited, never allowed to affect the
       // download itself. Only ids are sent: no file content, no custom-rules text.
       fetch("/api/track-bundle", {
