@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_MODE, DEFAULT_TARGETS } from "@/lib/agent-hub/generator";
-import { getApp } from "@/lib/github-app/client";
+import { getApp, type InstallationOctokit } from "@/lib/github-app/client";
 import { BOT_LOGIN, GITHUB_APP_CONFIGURED } from "@/lib/github-app/env";
 import { getRepoConfig, isRedisConfigured, removeInstallation, removeRepoConfig, saveRepoConfig, type RepoConfig } from "@/lib/github-app/repoConfigStore";
-import { syncRepo } from "@/lib/github-app/sync";
+import { syncRepo, type SyncResult } from "@/lib/github-app/sync";
 
 export const runtime = "nodejs";
 
@@ -26,6 +26,34 @@ function defaultConfig(installationId: number, repo: RepoRef, defaultBranch: str
   };
 }
 
+/** `installation.created`'s payload documents `repositories` as "an array of repository objects the
+ * installation can access," but that's undocumented for the "all repositories" install scope specifically
+ * — rather than depend on payload behavior GitHub doesn't pin down, ask the installation's own token what
+ * it can see. Also the fallback if a payload's `repositories` array ever comes back empty for any reason. */
+async function listAccessibleRepos(octokit: InstallationOctokit): Promise<RepoRef[]> {
+  const repos: RepoRef[] = [];
+  let page = 1;
+  for (;;) {
+    const { data } = await octokit.request("GET /installation/repositories", { per_page: 100, page });
+    repos.push(...data.repositories.map((r) => ({ id: Number(r.id), name: r.name, full_name: r.full_name })));
+    if (data.repositories.length < 100) break;
+    page += 1;
+  }
+  return repos;
+}
+
+/** Every per-repo sync outcome is logged (Vercel's function logs) so a silent no-op — no PR, no thrown
+ * error — is still diagnosable after the fact instead of leaving no trace anywhere. */
+function logSyncResult(repoFullName: string, result: SyncResult) {
+  if (result.status === "error") {
+    console.error(`[agent-hub-sync] ${repoFullName}: ${result.status} — ${result.message}`);
+  } else if (result.status === "pr-opened" || result.status === "pr-updated") {
+    console.log(`[agent-hub-sync] ${repoFullName}: ${result.status} — ${result.url} (${result.changedFiles.join(", ")})`);
+  } else {
+    console.log(`[agent-hub-sync] ${repoFullName}: ${result.status}`);
+  }
+}
+
 let handlersRegistered = false;
 
 /** Registers the event handlers on the shared `App`'s webhooks emitter exactly once per process — the
@@ -38,16 +66,27 @@ function ensureHandlersRegistered() {
   const app = getApp();
 
   app.webhooks.on("installation.created", async ({ payload }) => {
+    console.log(`[agent-hub-sync] installation.created for installation ${payload.installation.id}, redis=${isRedisConfigured()}`);
     if (!isRedisConfigured()) return;
-    const repos = (payload.repositories ?? []) as RepoRef[];
+    const octokit = await app.getInstallationOctokit(payload.installation.id);
+    let repos = (payload.repositories ?? []) as RepoRef[];
+    if (repos.length === 0) repos = await listAccessibleRepos(octokit); // see listAccessibleRepos's doc comment
+    console.log(`[agent-hub-sync] installation.created: ${repos.length} repo(s) to sync — ${repos.map((r) => r.full_name).join(", ") || "(none)"}`);
+
     for (const repo of repos) {
-      // The webhook payload's repository list doesn't include the default branch — fetch it once per repo.
-      const octokit = await app.getInstallationOctokit(payload.installation.id);
-      const [owner, name] = repo.full_name.split("/");
-      const { data } = await octokit.request("GET /repos/{owner}/{repo}", { owner, repo: name });
-      const config = defaultConfig(payload.installation.id, repo, data.default_branch);
-      await saveRepoConfig(config);
-      await syncRepo(config); // zero-config first sync, so installing the App alone is enough to see it work
+      try {
+        // The webhook payload's repository list doesn't include the default branch — fetch it once per repo.
+        const [owner, name] = repo.full_name.split("/");
+        const { data } = await octokit.request("GET /repos/{owner}/{repo}", { owner, repo: name });
+        const config = defaultConfig(payload.installation.id, repo, data.default_branch);
+        await saveRepoConfig(config);
+        const result = await syncRepo(config); // zero-config first sync, so installing the App alone is enough to see it work
+        logSyncResult(repo.full_name, result);
+      } catch (err) {
+        // One repo failing (e.g. an unusual permission edge case) shouldn't stop the rest of a multi-repo
+        // install from syncing, and shouldn't turn into an opaque 400 for the whole webhook delivery either.
+        console.error(`[agent-hub-sync] ${repo.full_name}: threw during installation.created —`, err);
+      }
     }
   });
 
@@ -61,11 +100,16 @@ function ensureHandlersRegistered() {
     const repos = payload.repositories_added as RepoRef[];
     const octokit = await app.getInstallationOctokit(payload.installation.id);
     for (const repo of repos) {
-      const [owner, name] = repo.full_name.split("/");
-      const { data } = await octokit.request("GET /repos/{owner}/{repo}", { owner, repo: name });
-      const config = defaultConfig(payload.installation.id, repo, data.default_branch);
-      await saveRepoConfig(config);
-      await syncRepo(config);
+      try {
+        const [owner, name] = repo.full_name.split("/");
+        const { data } = await octokit.request("GET /repos/{owner}/{repo}", { owner, repo: name });
+        const config = defaultConfig(payload.installation.id, repo, data.default_branch);
+        await saveRepoConfig(config);
+        const result = await syncRepo(config);
+        logSyncResult(repo.full_name, result);
+      } catch (err) {
+        console.error(`[agent-hub-sync] ${repo.full_name}: threw during installation_repositories.added —`, err);
+      }
     }
   });
 
@@ -78,7 +122,10 @@ function ensureHandlersRegistered() {
   app.webhooks.on("push", async ({ payload }) => {
     if (!isRedisConfigured()) return;
     const repo = payload.repository;
-    if (!repo || payload.ref !== `refs/heads/${repo.default_branch}`) return; // ignore pushes to any other branch, including our own sync branch
+    if (!repo || payload.ref !== `refs/heads/${repo.default_branch}`) {
+      console.log(`[agent-hub-sync] push ignored: ref=${payload.ref} default=${repo?.default_branch}`);
+      return; // ignore pushes to any other branch, including our own sync branch
+    }
     if (BOT_LOGIN && payload.pusher?.name === BOT_LOGIN) return; // extra guard against reacting to our own commits
     if (!payload.installation) return;
 
@@ -88,7 +135,12 @@ function ensureHandlersRegistered() {
     } else {
       config = { ...config, defaultBranch: repo.default_branch };
     }
-    await syncRepo(config);
+    try {
+      const result = await syncRepo(config);
+      logSyncResult(repo.full_name, result);
+    } catch (err) {
+      console.error(`[agent-hub-sync] ${repo.full_name}: threw during push —`, err);
+    }
   });
 }
 

@@ -28,3 +28,5 @@ export function getApp(): App {
 export async function getInstallationOctokit(installationId: number) {
   return getApp().getInstallationOctokit(installationId);
 }
+
+export type InstallationOctokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
