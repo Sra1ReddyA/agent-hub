@@ -189,6 +189,14 @@ export function OutputPreview({
       const { saveAs } = await import("file-saver");
       const name = stackIds.length <= 3 ? stackIds.join("-") : "fullstack";
       saveAs(blob, `${name}-agent-bundle.zip`);
+      // Best-effort usage signal for the /admin dashboard — never awaited, never allowed to affect the
+      // download itself. Only ids are sent: no file content, no custom-rules text.
+      fetch("/api/track-bundle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stacks: stackIds, mode, targets: targetIds, ci: includeCiCheck }),
+        keepalive: true,
+      }).catch(() => {});
     } finally {
       setZipping(false);
     }

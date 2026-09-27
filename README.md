@@ -33,6 +33,7 @@ is nothing to wait for and nothing that can hallucinate.
   - [Any other Node host](#any-other-node-host-netlify-render-flyio-a-vps)
   - [Static export (no server needed)](#static-export-no-server-needed)
 - [Environment variables](#environment-variables)
+- [Admin dashboard & usage analytics](#admin-dashboard--usage-analytics)
 - [Extending Agent Hub](#extending-agent-hub)
   - [Add a new stack](#add-a-new-stack)
   - [Add a new target (AI coding tool)](#add-a-new-target-ai-coding-tool)
@@ -391,31 +392,69 @@ For platforms that want a build command + start command in their dashboard (Rend
 - **Build command:** `npm install && npm run build`
 - **Start command:** `npm start`
 
-### Static export (no server needed)
+### Static export (no server needed) — the generator only, not `/admin`
 
-Every route in Agent Hub is fully static (no server components that read request data, no dynamic
-routes) — everything is computed client-side. If you'd rather host it as plain static files (GitHub
-Pages, S3 + CloudFront, any static file host with no Node runtime at all), you can switch to a static
-export:
+The generator itself (everything under `/` and `/guides`) is fully static — no server components that
+read request data, no dynamic routes, everything computed client-side. If you'd rather host *just the
+generator* as plain static files (GitHub Pages, S3 + CloudFront, any static file host with no Node
+runtime at all), you can switch to a static export:
 
 1. In `next.config.ts`, change `output: "standalone"` to `output: "export"`.
-2. Run `npm run build` — static HTML/CSS/JS lands in the `out/` directory.
-3. Upload `out/` to your static host.
+2. Remove or ignore the `/admin` route and `proxy.ts` — a static export has no server to run either
+   on, so the admin dashboard and usage tracking simply won't exist in that build.
+3. Run `npm run build` — static HTML/CSS/JS lands in the `out/` directory.
+4. Upload `out/` to your static host.
 
-(This isn't the default because `output: "standalone"` gives you a smaller Docker image and works
-identically on Vercel/Node hosts without a second config to maintain — but the app itself has zero
-server-only dependencies, so the export path always works if you'd rather go fully static.)
+(This isn't the default because `output: "standalone"`/a normal Vercel/Node deploy gives you the `/admin`
+dashboard and usage tracking below, and works identically on Vercel/Node hosts without a second config to
+maintain — but the generator itself has zero server-only dependencies, so the export path always works if
+all you want is the generator with no analytics at all.)
 
 ## Environment variables
 
-Copy `.env.example` to `.env.local` for local overrides (none are required to run the app):
+Copy `.env.example` to `.env.local` for local overrides. Only the first is relevant to the generator
+itself; the rest are entirely optional and only affect the `/admin` dashboard (see below).
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_SITE_URL` | No (defaults to `http://localhost:3000`) | Used to build canonical URLs, Open Graph/Twitter metadata and JSON-LD structured data. Set this to your real production domain once deployed. |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | No — required only to open `/admin` | HTTP Basic Auth credentials for the admin dashboard, checked in `src/proxy.ts`. Pick your own values; without both set, `/admin` returns a 503 and the rest of the app is unaffected. |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | No | Durable storage for `/admin`'s analytics. Without these, analytics still works via an in-memory fallback (fine for local dev, not for production — see [Admin dashboard & usage analytics](#admin-dashboard--usage-analytics)). |
 
-There is no API key, database URL, or secret of any kind — the app has no server-side logic that needs
-one.
+The generator itself still needs no API key, database, or secret of any kind — everything above is opt-in
+infrastructure for the site owner's own analytics, not for the generator to function.
+
+## Admin dashboard & usage analytics
+
+A password-protected `/admin` page shows the site owner (and only the site owner) how the app is actually
+being used: total visits, visits per day, which stacks/tools/mode people actually pick when they generate a
+bundle, and how many turn on the CI guardrail check. This is the one piece of server-side state in an
+otherwise fully client-side app, and it's entirely opt-in — skip the setup below and the rest of the app
+works exactly as it always has, with `/admin` simply returning a 503 that explains it isn't configured.
+
+**What's tracked, and what isn't.** On every page view, `components/Analytics.tsx` sends a `path` and a
+bare referrer *hostname* (never the full referrer URL, never an IP address, never a cookie or fingerprint)
+to `/api/track`. On every successful bundle download, `OutputPreview.tsx` sends which stack ids, target
+ids, generation mode, and CI-toggle state were used to `/api/track-bundle` — never the generated file
+content, and never the free-text team-specific custom rules, since those could contain something specific
+to the visitor's own repository.
+
+**Setup:**
+
+1. **Set login credentials.** Add `ADMIN_USER` and `ADMIN_PASSWORD` — locally in `.env.local`, or in your
+   Vercel project's Settings → Environment Variables for production. Pick your own values; these are the
+   credentials `src/proxy.ts` checks via HTTP Basic Auth before `/admin` ever renders.
+2. **(Recommended for production) Add durable storage.** Without it, analytics uses an in-memory fallback
+   that resets on every deploy/restart and isn't shared across serverless instances — fine to confirm the
+   feature works locally, useless as real production analytics. Get a free Redis database either from the
+   Vercel Marketplace (your project → Storage → Marketplace Database Providers → any Redis option) or
+   directly at [upstash.com](https://upstash.com), then set `UPSTASH_REDIS_REST_URL` and
+   `UPSTASH_REDIS_REST_TOKEN` from it.
+3. **Open `/admin`** on your deployed site (or `http://localhost:3000/admin` locally) and enter the
+   credentials from step 1 when the browser's Basic Auth prompt appears.
+
+There's exactly one admin account by design — see the doc comment in `src/proxy.ts` for why Basic
+Auth is the right amount of complexity here, and what to reach for instead if you ever need more than one.
 
 ## Extending Agent Hub
 
@@ -456,10 +495,14 @@ across every existing target and every generation mode automatically.
 ```
 agent-hub/
 ├── src/
+│   ├── proxy.ts                   # Basic Auth gate for /admin (ADMIN_USER / ADMIN_PASSWORD)
 │   ├── app/
 │   │   ├── page.tsx              # Home page — the generator (stack + target picker, FAQ)
 │   │   ├── guides/page.tsx        # Guides — what the files do, per-tool setup, how to write directives
-│   │   ├── layout.tsx             # Root layout, global metadata, theme-flash-free dark mode init
+│   │   ├── admin/page.tsx         # Password-protected usage analytics dashboard (server component)
+│   │   ├── api/track/route.ts     # Records one page view (path + referrer hostname only)
+│   │   ├── api/track-bundle/route.ts # Records one "bundle generated" event (stacks/mode/targets/CI toggle)
+│   │   ├── layout.tsx             # Root layout, global metadata, theme-flash-free dark mode init, mounts <Analytics />
 │   │   ├── globals.css            # Theme tokens (light/dark), component classes (.btn-*, .card, .pill)
 │   │   ├── robots.ts / sitemap.ts # SEO
 │   │   └── icon.svg
@@ -468,6 +511,7 @@ agent-hub/
 │   │   ├── TechSelector.tsx       # Multi-select stack picker — categorized checkboxes + removable-tag summary
 │   │   ├── ManifestDetector.tsx   # Paste a package.json/requirements.txt/etc. → auto-selects matching stacks
 │   │   ├── OutputPreview.tsx      # Mode toggle, custom rules + CI toggle + share link, tool picker, preview, zip download
+│   │   ├── Analytics.tsx          # Invisible: beacons one page-view event to /api/track per route change
 │   │   ├── SiteHeader.tsx / SiteFooter.tsx / ThemeToggle.tsx / JsonLd.tsx
 │   └── lib/
 │       ├── agent-hub/
@@ -482,6 +526,7 @@ agent-hub/
 │       │   └── templates/
 │       │       ├── masterAgent.ts         # 10-directive template; single-stack and combined-agent builders
 │       │       └── universalGuardrails.ts # Universal Guardrails + Mandatory End-of-Session Reporting text
+│       ├── analytics/store.ts     # Upstash Redis (or in-memory fallback) reads/writes behind /admin
 │       └── seo.ts                 # Metadata + JSON-LD helpers
 ├── public/
 ├── Dockerfile
@@ -495,8 +540,10 @@ agent-hub/
 - **Deterministic, not "AI-powered."** No language model runs to produce output, and the app never claims
   otherwise — see the FAQ on the home page. What you get is exactly reproducible from the stack + target
   selection.
-- **Nothing leaves the browser.** Stack/target selection, bundle generation and the zip file are all built
-  client-side. The only thing persisted is your last selection, in `localStorage`, on your device.
+- **Nothing you generate leaves the browser.** Stack/target selection, bundle generation and the zip file
+  are all built client-side; your last selection is persisted only in `localStorage`, on your device. The
+  one deliberate exception is the opt-in `/admin` analytics above — anonymous, aggregate, and visible only
+  to the site owner, never to a visitor, and the feature is entirely dormant until you configure it.
 - **One master agent, many wrappers.** The content that defines "good code" for a stack is written once
   and reused across every tool — see [How it's built](#how-its-built-architecture).
 - **No duplicated guardrails.** The Universal Guardrails, Cross-Stack Guardrails, and end-of-session

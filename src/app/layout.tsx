@@ -3,6 +3,7 @@ import "./globals.css";
 import { JsonLd } from "@/components/JsonLd";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
+import { Analytics } from "@/components/Analytics";
 import { SITE_NAME, SITE_URL, CORE_KEYWORDS, organizationLd, websiteLd } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-screen font-sans">
         <JsonLd data={[organizationLd(), websiteLd()]} />
+        <Analytics />
         <SiteHeader />
         <main>{children}</main>
         <SiteFooter />

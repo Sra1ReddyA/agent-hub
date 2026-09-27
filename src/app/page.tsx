@@ -41,7 +41,10 @@ const FAQS = [
     a: "Whenever your selection spans multiple layers, a Cross-Stack Guardrails section is added automatically — generic rules for any frontend+backend, backend+database, or full-stack combination, plus curated guidance for specific, common pairings like React+FastAPI, Next.js+Prisma or FastAPI+MongoDB. It's how the agent knows a database migration isn't done until the backend model and the frontend that depends on it are updated too.",
   },
   { q: "Does the zip extract cleanly into my project?", a: "Yes. Every file sits at its real project-root-relative path inside the zip — extracting it directly into your project root populates .github/, CLAUDE.md, .cursor/, .agent.md, etc. immediately, with no extra wrapper folder." },
-  { q: "Is anything sent to a server?", a: "No. Stack selection, mode, target selection, bundle generation and the zip file are all built in your browser. Your last picks are remembered in your browser's local storage only, so they're there next time you open the page — nothing is uploaded anywhere." },
+  {
+    q: "Is anything sent to a server?",
+    a: "The generator itself, no — stack selection, mode, target selection, bundle generation and the zip file are all built entirely in your browser, and your last picks are remembered in your browser's local storage only. The one exception: the site owner records anonymous, aggregate usage — page paths, a bare referrer hostname, and which stacks/tools/mode a generated bundle used — visible only on a password-protected internal dashboard. No file content, no custom team-rules text, no IP address, and no cookie or fingerprinting is ever collected.",
+  },
   { q: "Can I edit the generated files afterward?", a: "Yes, and you should. They're a strong, opinionated starting point, not a rulebook carved in stone — trim, extend or reword any directive to match how your team actually works. The Guides page has tips on what's worth customizing first." },
 ];
 
