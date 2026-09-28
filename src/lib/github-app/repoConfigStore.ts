@@ -17,6 +17,10 @@ const kv = KV_CONFIGURED ? new Redis({ url: process.env.UPSTASH_REDIS_REST_URL!,
 export const REDIS_REQUIRED_MESSAGE =
   "Agent Hub Sync needs UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN set — it has to remember which repos it's watching between runs, so unlike /admin's analytics there's no in-memory fallback for this one.";
 
+/** Every outcome `syncRepo()` can return, mirrored here (rather than imported from `sync.ts`) so this
+ * store module has no dependency on the sync engine — just the shape of what it reports. */
+export type SyncStatus = "up-to-date" | "no-manifest-signal" | "pr-opened" | "pr-updated" | "error";
+
 export type RepoConfig = {
   installationId: number;
   repoFullName: string; // "owner/repo"
@@ -27,7 +31,9 @@ export type RepoConfig = {
   customRules?: string;
   includeCiCheck: boolean;
   lastSyncedContentVersion: string | null; // Agent Hub TEMPLATE_CONTENT_VERSION at last successful sync
-  lastSyncedAt: number | null;
+  lastSyncedAt: number | null; // last time syncRepo() ran at all, whatever the outcome — the admin page's proof-of-life
+  lastSyncStatus: SyncStatus | null;
+  lastSyncError: string | null; // set only when lastSyncStatus is "error"
   lastPrUrl: string | null;
 };
 

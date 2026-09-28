@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { getAnalyticsSummary } from "@/lib/analytics/store";
 import { STACKS } from "@/lib/agent-hub/stacks";
 import { TARGETS } from "@/lib/agent-hub/targets";
@@ -52,7 +53,12 @@ export default async function AdminPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:py-14">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-[var(--color-ink)]">Admin — Usage Analytics</h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-bold text-[var(--color-ink)]">Admin — Usage Analytics</h1>
+          <Link href="/admin/sync" className="text-sm text-[var(--color-accent)] underline underline-offset-2">
+            Sync status & config →
+          </Link>
+        </div>
         <p className="mt-1 text-sm text-[var(--color-muted)]">
           Visible only to you, behind Basic Auth (see <code className="font-mono text-xs">src/proxy.ts</code>). Nothing here is shown to visitors.
         </p>

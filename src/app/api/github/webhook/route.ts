@@ -22,6 +22,8 @@ function defaultConfig(installationId: number, repo: RepoRef, defaultBranch: str
     includeCiCheck: false,
     lastSyncedContentVersion: null,
     lastSyncedAt: null,
+    lastSyncStatus: null,
+    lastSyncError: null,
     lastPrUrl: null,
   };
 }

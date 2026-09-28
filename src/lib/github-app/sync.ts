@@ -2,7 +2,7 @@ import { buildBundle } from "../agent-hub/generator";
 import { detectStacksFromManifest } from "../agent-hub/detect";
 import { CHANGELOG, TEMPLATE_CONTENT_VERSION } from "../agent-hub/version";
 import { getInstallationOctokit } from "./client";
-import { type RepoConfig, saveRepoConfig } from "./repoConfigStore";
+import { type RepoConfig, type SyncStatus, saveRepoConfig } from "./repoConfigStore";
 
 type Octokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
 
@@ -120,6 +120,18 @@ export type SyncResult =
   | { status: "pr-opened" | "pr-updated"; url: string; changedFiles: string[] }
   | { status: "error"; message: string };
 
+/** Records the outcome of a run on the config itself — `lastSyncedAt`/`lastSyncStatus`/`lastSyncError` —
+ * regardless of whether anything actually changed, so `/admin/sync` can show "checked 4 minutes ago, no
+ * changes" rather than going silent on every no-op run. Best-effort: a failure here shouldn't turn a real
+ * result into an error, since the caller (webhook/cron) already logs the actual `SyncResult` separately. */
+async function recordOutcome(config: RepoConfig, status: SyncStatus, error: string | null, extra: Partial<RepoConfig> = {}) {
+  try {
+    await saveRepoConfig({ ...config, ...extra, lastSyncedAt: Date.now(), lastSyncStatus: status, lastSyncError: error });
+  } catch {
+    // Redis hiccup on the bookkeeping write — the sync itself (and its logged result) already happened.
+  }
+}
+
 /** The whole point of Agent Hub Sync in one function: re-detect the repo's stack, rebuild the bundle
  * against the latest template content, diff it against what's actually committed, and — only if something
  * really changed — push a commit to a dedicated `agent-hub-sync` branch and open (or silently update) one
@@ -136,12 +148,14 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
     const addedStacks = detected.filter((id) => !config.stackIds.includes(id));
 
     if (mergedStacks.length === 0) {
+      await recordOutcome(config, "no-manifest-signal", null);
       return { status: "no-manifest-signal" };
     }
 
     const versionUnchanged = config.lastSyncedContentVersion === TEMPLATE_CONTENT_VERSION;
     const stacksUnchanged = addedStacks.length === 0;
     if (versionUnchanged && stacksUnchanged) {
+      await recordOutcome(config, "up-to-date", null);
       return { status: "up-to-date" };
     }
 
@@ -156,7 +170,7 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
     const changed = files.filter((f, i) => existing[i] !== f.content);
 
     if (changed.length === 0) {
-      await saveRepoConfig({ ...config, stackIds: mergedStacks, lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION, lastSyncedAt: Date.now() });
+      await recordOutcome(config, "up-to-date", null, { stackIds: mergedStacks, lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION });
       return { status: "up-to-date" };
     }
 
@@ -228,16 +242,16 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
       status = "pr-opened";
     }
 
-    await saveRepoConfig({
-      ...config,
+    await recordOutcome(config, status, null, {
       stackIds: mergedStacks,
       lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION,
-      lastSyncedAt: Date.now(),
       lastPrUrl: prUrl,
     });
 
     return { status, url: prUrl, changedFiles: changed.map((f) => f.path) };
   } catch (err) {
-    return { status: "error", message: err instanceof Error ? err.message : String(err) };
+    const message = err instanceof Error ? err.message : String(err);
+    await recordOutcome(config, "error", message);
+    return { status: "error", message };
   }
 }
