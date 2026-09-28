@@ -110,13 +110,11 @@ export default async function AdminSyncPage() {
                   </span>
                 )}
                 {c.lastPrUrl && (
-                  <a
-                    href={c.lastPrUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ml-auto text-xs text-[var(--color-accent)] underline underline-offset-2"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                  // No onClick/stopPropagation here — this page is a Server Component, which can't pass
+                  // event handlers to a DOM element (that requires a Client Component). Clicking this link
+                  // also toggles the <details> panel since it's nested inside <summary>, but since the link
+                  // opens in a new tab anyway, that's a harmless side effect rather than a real UX problem.
+                  <a href={c.lastPrUrl} target="_blank" rel="noreferrer" className="ml-auto text-xs text-[var(--color-accent)] underline underline-offset-2">
                     Last PR ↗
                   </a>
                 )}
