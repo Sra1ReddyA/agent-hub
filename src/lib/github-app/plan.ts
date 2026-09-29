@@ -10,7 +10,7 @@
 export type Plan = "free" | "pro";
 
 export const PLAN_LIMITS: Record<Plan, number> = {
-  free: 3,
+  free: 10,
   pro: 50,
 };
 

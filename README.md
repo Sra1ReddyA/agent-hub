@@ -517,7 +517,7 @@ two installers should ever see each other's repos or config.
   login rather than cached anywhere. `/dashboard`'s Server Actions (`src/app/dashboard/actions.ts`)
   re-derive the caller's installation ids from that session on every call and refuse to touch a config
   outside it — unlike `/admin/sync`'s actions, which intentionally trust the operator with everything.
-- **Free-tier limits are real but basic.** `src/lib/github-app/plan.ts` caps a `"free"` installation at 3
+- **Free-tier limits are real but basic.** `src/lib/github-app/plan.ts` caps a `"free"` installation at 10
   synced repos; repos past the cap are granted access but never get a `RepoConfig`, and `/dashboard` shows
   the gap. There's no billing integration yet (`Installation.plan` is set directly wherever you run Redis,
   or from a future `/admin` control) — this is the tenancy/limits scaffolding a real checkout flow would
