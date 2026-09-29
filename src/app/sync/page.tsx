@@ -99,10 +99,23 @@ export default function SyncPage() {
 
       <div className="card mt-6 border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] p-4">
         <p className="text-sm text-[var(--color-ink)]">
-          <strong>Deploy this project first.</strong> GitHub validates the webhook URL when you create the App, so it needs to be a real, publicly
-          reachable domain — <code className="font-mono text-xs">NEXT_PUBLIC_SITE_URL</code> can&apos;t be <code className="font-mono text-xs">localhost</code>.
-          Run the step below from your deployed site, after setting that env var to your real domain.
+          <strong>Two prerequisites before you start:</strong>
         </p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--color-ink)]">
+          <li>
+            <strong>Deploy this project first.</strong> GitHub validates the webhook URL when you create the App, so it needs to be a real,
+            publicly reachable domain — <code className="font-mono text-xs">NEXT_PUBLIC_SITE_URL</code> can&apos;t be{" "}
+            <code className="font-mono text-xs">localhost</code>. Run step 1 below from your deployed site, after setting that env var to your
+            real domain.
+          </li>
+          <li>
+            <strong>Set up Redis first too.</strong> <code className="font-mono text-xs">UPSTASH_REDIS_REST_URL</code> /{" "}
+            <code className="font-mono text-xs">UPSTASH_REDIS_REST_TOKEN</code> (a free database from the Vercel Marketplace or upstash.com) —
+            Sync has no in-memory fallback like <Link href="/#" className="underline underline-offset-2">/admin</Link>&apos;s analytics does. Skip
+            this and everything below will appear to work — the App installs fine, GitHub shows green checkmarks — while every actual sync
+            silently does nothing.
+          </li>
+        </ul>
       </div>
 
       <div className="card mt-4 p-6">
@@ -120,13 +133,23 @@ export default function SyncPage() {
           </li>
           <li>
             <strong className="text-[var(--color-ink)]">2. Paste the resulting credentials into your deployment&apos;s env vars and redeploy.</strong>{" "}
-            The page after step 1 shows exactly what to paste — it&apos;s the same <code className="font-mono text-xs">.env</code> pattern as
-            everything else in this project (see the <Link href="/#" className="underline underline-offset-2">README</Link>&apos;s Environment
-            variables section).
+            The page after step 1 lays this out as four copy buttons plus a live check of whether Redis and{" "}
+            <code className="font-mono text-xs">CRON_SECRET</code> are already set — it won&apos;t let you miss either one. Same{" "}
+            <code className="font-mono text-xs">.env</code> pattern as everything else in this project (see the{" "}
+            <Link href="/#" className="underline underline-offset-2">README</Link>&apos;s Environment variables section).
           </li>
           <li>
-            <strong className="text-[var(--color-ink)]">3. Install it on your repositories.</strong> The same page gives you the install link once
-            your App exists. Pick the repos you want kept in sync — it opens its first PR within moments.
+            <strong className="text-[var(--color-ink)]">3. Install it on your repositories, after the redeploy finishes.</strong> The same page
+            gives you the install link once your App exists — wait for step 2&apos;s redeploy to actually complete before clicking it, or the
+            first webhook delivery hits the old build.
+          </li>
+          <li>
+            <strong className="text-[var(--color-ink)]">4. Verify it worked.</strong> Check{" "}
+            <Link href="/admin/sync" className="underline underline-offset-2">/admin/sync</Link> (behind your admin login) — the repo should show
+            up with a status within moments. If it doesn&apos;t, the <a href="#troubleshooting" className="underline underline-offset-2">
+              troubleshooting section
+            </a>{" "}
+            below almost certainly has it.
           </li>
         </ol>
       </div>
@@ -146,7 +169,7 @@ export default function SyncPage() {
         </div>
       </section>
 
-      <section className="mt-10">
+      <section id="troubleshooting" className="mt-10 scroll-mt-16">
         <h2 className="text-lg font-semibold text-[var(--color-ink)]">Troubleshooting</h2>
         <p className="mt-1 text-sm text-[var(--color-muted)]">
           Real failure modes hit while building this feature, not guesses — if a sync isn&apos;t doing what you expect, one of these is very likely why.
