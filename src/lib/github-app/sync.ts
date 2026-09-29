@@ -103,6 +103,21 @@ function summarizePrBody(config: RepoConfig, newStacks: string[], addedStacks: s
   return lines.filter((l) => l !== "").join("\n");
 }
 
+/** A stable fingerprint of the config fields that change generated *content* but aren't part of the
+ * stack/version signal above — `targetIds`, `mode`, `customRules`, `includeCiCheck`. Without this, editing
+ * these through `/admin/sync` and hitting "Sync now" was a silent no-op: the early up-to-date check below
+ * only ever compared stacks and `TEMPLATE_CONTENT_VERSION`, so a config-only edit (same stacks, same
+ * content version) short-circuited before `buildBundle` ever saw the new targets/mode/rules. `targetIds`
+ * is sorted first so reordering the same set of checkboxes doesn't count as a change. */
+function configFingerprint(config: Pick<RepoConfig, "mode" | "targetIds" | "customRules" | "includeCiCheck">): string {
+  return JSON.stringify({
+    mode: config.mode,
+    targetIds: [...config.targetIds].sort(),
+    customRules: config.customRules ?? "",
+    includeCiCheck: config.includeCiCheck,
+  });
+}
+
 function isNewer(a: string, b: string): boolean {
   const pa = a.split(".").map(Number);
   const pb = b.split(".").map(Number);
@@ -152,9 +167,11 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
       return { status: "no-manifest-signal" };
     }
 
+    const currentFingerprint = configFingerprint(config);
     const versionUnchanged = config.lastSyncedContentVersion === TEMPLATE_CONTENT_VERSION;
     const stacksUnchanged = addedStacks.length === 0;
-    if (versionUnchanged && stacksUnchanged) {
+    const configUnchanged = config.lastSyncedConfigFingerprint === currentFingerprint;
+    if (versionUnchanged && stacksUnchanged && configUnchanged) {
       await recordOutcome(config, "up-to-date", null);
       return { status: "up-to-date" };
     }
@@ -170,7 +187,11 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
     const changed = files.filter((f, i) => existing[i] !== f.content);
 
     if (changed.length === 0) {
-      await recordOutcome(config, "up-to-date", null, { stackIds: mergedStacks, lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION });
+      await recordOutcome(config, "up-to-date", null, {
+        stackIds: mergedStacks,
+        lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION,
+        lastSyncedConfigFingerprint: currentFingerprint,
+      });
       return { status: "up-to-date" };
     }
 
@@ -245,6 +266,7 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
     await recordOutcome(config, status, null, {
       stackIds: mergedStacks,
       lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION,
+      lastSyncedConfigFingerprint: currentFingerprint,
       lastPrUrl: prUrl,
     });
 

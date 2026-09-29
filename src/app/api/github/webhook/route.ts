@@ -21,6 +21,7 @@ function defaultConfig(installationId: number, repo: RepoRef, defaultBranch: str
     targetIds: DEFAULT_TARGETS,
     includeCiCheck: false,
     lastSyncedContentVersion: null,
+    lastSyncedConfigFingerprint: null,
     lastSyncedAt: null,
     lastSyncStatus: null,
     lastSyncError: null,

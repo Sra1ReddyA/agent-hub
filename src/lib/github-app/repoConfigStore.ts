@@ -31,6 +31,7 @@ export type RepoConfig = {
   customRules?: string;
   includeCiCheck: boolean;
   lastSyncedContentVersion: string | null; // Agent Hub TEMPLATE_CONTENT_VERSION at last successful sync
+  lastSyncedConfigFingerprint: string | null; // hash of {mode, targetIds, customRules, includeCiCheck} at last sync — see sync.ts's configFingerprint()
   lastSyncedAt: number | null; // last time syncRepo() ran at all, whatever the outcome — the admin page's proof-of-life
   lastSyncStatus: SyncStatus | null;
   lastSyncError: string | null; // set only when lastSyncStatus is "error"
