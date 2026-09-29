@@ -10,6 +10,38 @@ export const metadata = pageMetadata({
   keywords: ["github app ai agent rules sync", "keep cursorrules updated", "AGENTS.md automation", "ai coding agent config bot"],
 });
 
+// Every one of these is a real failure mode hit while building and testing this feature against live
+// repos, not a hypothetical — see the commit history of `src/lib/github-app/` and `src/app/api/github/` if
+// you want the full story behind any one of them. Written as symptom → fix specifically so it's skimmable
+// under actual troubleshooting pressure, unlike the FAQ list above which is skimmable for evaluating the
+// feature before you've installed anything.
+const SYNC_TROUBLESHOOTING = [
+  {
+    symptom: "Nothing seems to happen after installing the App, or after a push.",
+    fix: "Check your deployment's function logs (Vercel: Project → Logs), filtered to \"agent-hub-sync\" — every run logs its outcome there even when nothing visible happens. \"no-manifest-signal\" means no supported manifest file (package.json, requirements.txt, etc.) was found at the repo root. If you see no agent-hub-sync log lines at all, check the App's Advanced tab → Recent Deliveries on GitHub to confirm the webhook is actually reaching your deployment.",
+  },
+  {
+    symptom: "A sync ran (the logs say pr-opened) but I can't find the PR.",
+    fix: "GitHub's global Pull Requests inbox filters to PRs that \"involve you\" by some notion GitHub applies internally, and can miss one opened by the bot on a repo you own. Check that repo's own Pull Requests tab directly, not the cross-repo inbox.",
+  },
+  {
+    symptom: "Pushing to main did nothing, but pushing to another branch triggered a sync.",
+    fix: "Sync only reacts to pushes on the repository's actual GitHub-configured default branch — whatever it's set to, not necessarily the literal name \"main\". Check Settings → Branches on the repo in question. (A push to a branch with its own open PR can also trigger a comment from Vercel's own preview-deployment bot, which is unrelated to Agent Hub Sync entirely — easy to conflate the two if both fire around the same time.)",
+  },
+  {
+    symptom: "A sync fails with \"Resource not accessible by integration\" pointing at the git/trees API.",
+    fix: "The \"Include CI enforcement check\" option writes a GitHub Actions workflow file, which needs the App's separate \"Workflows\" permission — \"Contents\" access alone isn't enough. Apps created through the flow below request it automatically now; if your App predates that, add it under the App's Permissions & webhooks settings on GitHub, save, then accept the updated permissions for the installation (Settings → Installations → Configure). Turning the CI check option off avoids this entirely.",
+  },
+  {
+    symptom: "Right after creating the App, the redirect lands on a 404 (NOT_FOUND) page.",
+    fix: "Almost always NEXT_PUBLIC_SITE_URL pointing at a different domain than what's actually deployed — double-check it matches your real production URL exactly (your Vercel project's assigned domain, not a placeholder), then redo the setup flow from that exact URL.",
+  },
+  {
+    symptom: "I closed the sync branch's PR without merging, and the next change opened a new PR instead of reopening it.",
+    fix: "Expected, not a bug — Sync only ever updates a currently open PR. Closing one and then pushing another change opens a fresh PR from the same branch rather than reopening the old one.",
+  },
+];
+
 const SYNC_FAQS = [
   {
     q: "What does it actually do?",
@@ -110,6 +142,21 @@ export default function SyncPage() {
               </summary>
               <p className="mt-3 text-sm text-[var(--color-muted)]">{f.a}</p>
             </details>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold text-[var(--color-ink)]">Troubleshooting</h2>
+        <p className="mt-1 text-sm text-[var(--color-muted)]">
+          Real failure modes hit while building this feature, not guesses — if a sync isn&apos;t doing what you expect, one of these is very likely why.
+        </p>
+        <div className="mt-3 space-y-3">
+          {SYNC_TROUBLESHOOTING.map((t) => (
+            <div key={t.symptom} className="card p-4">
+              <p className="text-sm font-semibold text-[var(--color-ink)]">{t.symptom}</p>
+              <p className="mt-1.5 text-sm text-[var(--color-muted)]">{t.fix}</p>
+            </div>
           ))}
         </div>
       </section>
