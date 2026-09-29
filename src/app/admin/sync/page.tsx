@@ -1,45 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { STACKS } from "@/lib/agent-hub/stacks";
-import { TARGETS } from "@/lib/agent-hub/targets";
 import { TEMPLATE_CONTENT_VERSION } from "@/lib/agent-hub/version";
-import { isRedisConfigured, listAllRepoConfigs, type RepoConfig, type SyncStatus } from "@/lib/github-app/repoConfigStore";
-import { updateRepoConfig, triggerSyncNow } from "./actions";
+import { isRedisConfigured, listAllRepoConfigs } from "@/lib/github-app/repoConfigStore";
+import { RepoConfigCard } from "./RepoConfigCard";
 
 export const metadata: Metadata = { title: "Admin — Sync", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic"; // this page's whole job is live state — never cache it
-
-const key = (c: RepoConfig) => `${c.installationId}::${c.repoFullName}`;
-
-function statusBadge(status: SyncStatus | null) {
-  const styles: Record<string, string> = {
-    "pr-opened": "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border-[var(--color-accent)]/40",
-    "pr-updated": "bg-[var(--color-accent-soft)] text-[var(--color-accent)] border-[var(--color-accent)]/40",
-    "up-to-date": "bg-[var(--color-border)]/40 text-[var(--color-muted)] border-[var(--color-border)]",
-    "no-manifest-signal": "bg-[var(--color-border)]/40 text-[var(--color-muted)] border-[var(--color-border)]",
-    error: "bg-red-500/10 text-red-600 border-red-500/40",
-  };
-  const labels: Record<string, string> = {
-    "pr-opened": "PR opened",
-    "pr-updated": "PR updated",
-    "up-to-date": "Up to date",
-    "no-manifest-signal": "No manifest signal",
-    error: "Error",
-  };
-  if (!status) return <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-muted)]">Never run</span>;
-  return <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${styles[status]}`}>{labels[status]}</span>;
-}
-
-function timeAgo(ts: number | null) {
-  if (!ts) return "never";
-  const diffMs = Date.now() - ts;
-  const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
 
 export default async function AdminSyncPage() {
   if (!isRedisConfigured()) {
@@ -99,102 +65,7 @@ export default async function AdminSyncPage() {
       ) : (
         <div className="mt-6 space-y-4">
           {configs.map((c) => (
-            <details key={key(c)} className="card overflow-hidden p-0">
-              <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 p-4">
-                <span className="font-mono text-sm font-semibold text-[var(--color-ink)]">{c.repoFullName}</span>
-                {statusBadge(c.lastSyncStatus)}
-                <span className="text-xs text-[var(--color-muted)]">checked {timeAgo(c.lastSyncedAt)}</span>
-                {c.lastSyncedContentVersion !== TEMPLATE_CONTENT_VERSION && (
-                  <span className="rounded-full border border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] px-2 py-0.5 text-xs text-[var(--color-accent)]">
-                    content v{c.lastSyncedContentVersion ?? "—"} → v{TEMPLATE_CONTENT_VERSION} available
-                  </span>
-                )}
-                {c.lastPrUrl && (
-                  // No onClick/stopPropagation here — this page is a Server Component, which can't pass
-                  // event handlers to a DOM element (that requires a Client Component). Clicking this link
-                  // also toggles the <details> panel since it's nested inside <summary>, but since the link
-                  // opens in a new tab anyway, that's a harmless side effect rather than a real UX problem.
-                  <a href={c.lastPrUrl} target="_blank" rel="noreferrer" className="ml-auto text-xs text-[var(--color-accent)] underline underline-offset-2">
-                    Last PR ↗
-                  </a>
-                )}
-              </summary>
-
-              <div className="border-t border-[var(--color-border)] p-4">
-                {c.lastSyncStatus === "error" && c.lastSyncError && (
-                  <p className="mb-4 rounded-[var(--radius-md)] border border-red-500/40 bg-red-500/10 p-3 font-mono text-xs text-red-700">
-                    {c.lastSyncError}
-                  </p>
-                )}
-
-                <form action={updateRepoConfig} className="space-y-4">
-                  <input type="hidden" name="key" value={key(c)} />
-
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">Stacks tracked</p>
-                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                      {STACKS.map((s) => (
-                        <label key={s.id} className="flex items-center gap-1.5 text-sm text-[var(--color-ink)]">
-                          <input type="checkbox" name="stackIds" value={s.id} defaultChecked={c.stackIds.includes(s.id)} />
-                          {s.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">Targets generated</p>
-                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                      {TARGETS.map((t) => (
-                        <label key={t.id} className="flex items-center gap-1.5 text-sm text-[var(--color-ink)]">
-                          <input type="checkbox" name="targetIds" value={t.id} defaultChecked={c.targetIds.includes(t.id)} />
-                          {t.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-4">
-                    <label className="flex items-center gap-2 text-sm text-[var(--color-ink)]">
-                      Mode
-                      <select name="mode" defaultValue={c.mode} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-transparent px-2 py-1 text-sm">
-                        <option value="combined">Combined</option>
-                        <option value="modular">Modular</option>
-                      </select>
-                    </label>
-                    <label className="flex items-center gap-1.5 text-sm text-[var(--color-ink)]">
-                      <input type="checkbox" name="includeCiCheck" defaultChecked={c.includeCiCheck} />
-                      Include CI enforcement check
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">Custom rules</label>
-                    <textarea
-                      name="customRules"
-                      defaultValue={c.customRules ?? ""}
-                      rows={3}
-                      placeholder="Extra team-specific directives appended to every generated file."
-                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-transparent p-2 text-sm"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button type="submit" className="btn-primary text-sm">
-                      Save config
-                    </button>
-                    <span className="text-xs text-[var(--color-muted)]">Applies on the next push or sync run — doesn&apos;t sync immediately.</span>
-                  </div>
-                </form>
-
-                <form action={triggerSyncNow} className="mt-3 border-t border-[var(--color-border)] pt-3">
-                  <input type="hidden" name="key" value={key(c)} />
-                  <button type="submit" className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-ink)] hover:bg-[var(--color-border)]/20">
-                    Sync now →
-                  </button>
-                </form>
-              </div>
-            </details>
+            <RepoConfigCard key={`${c.installationId}::${c.repoFullName}`} config={c} />
           ))}
         </div>
       )}

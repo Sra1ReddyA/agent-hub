@@ -5,26 +5,34 @@ import type { GenerationMode } from "@/lib/agent-hub/generator";
 import type { StackId } from "@/lib/agent-hub/stacks";
 import type { TargetId } from "@/lib/agent-hub/targets";
 import { getRepoConfig, saveRepoConfig } from "@/lib/github-app/repoConfigStore";
-import { syncRepo } from "@/lib/github-app/sync";
+import { syncRepo, type SyncResult } from "@/lib/github-app/sync";
 
 /**
  * Server Actions backing `/admin/sync`. These run as POSTs to that same page's own route, so they're
  * covered by `src/proxy.ts`'s existing `/admin/:path*` Basic Auth matcher without needing a separate
  * `/api/admin/*` surface to remember to protect — there's exactly one operator, and this page is already
  * behind their login.
+ *
+ * Both actions return an `ActionState` rather than `void` — `RepoConfigCard.tsx` binds them through
+ * React's `useActionState`, which needs a return value to show anything happened at all. Returning void
+ * (the original shape) meant the only visible effect of clicking "Save config" or "Sync now" was a full
+ * page navigation, which reset every collapsed `<details>` panel back to closed — indistinguishable, from
+ * the operator's chair, from the click having done nothing.
  */
 
+export type ActionState = { kind: "idle" } | { kind: "saved" } | { kind: "synced"; result: SyncResult } | { kind: "error"; message: string };
+
 function parseKey(key: string): { installationId: number; repoFullName: string } {
-  // `key` is `${installationId}::${owner}/${repo}` — see the hidden form field in page.tsx.
+  // `key` is `${installationId}::${owner}/${repo}` — see the hidden form field in RepoConfigCard.tsx.
   const [idStr, repoFullName] = key.split("::");
   return { installationId: Number(idStr), repoFullName };
 }
 
-export async function updateRepoConfig(formData: FormData) {
+export async function updateRepoConfig(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const key = String(formData.get("key") ?? "");
   const { installationId, repoFullName } = parseKey(key);
   const existing = await getRepoConfig(installationId, repoFullName);
-  if (!existing) return;
+  if (!existing) return { kind: "error", message: "This repo's config wasn't found — it may have just been uninstalled." };
 
   const stackIds = formData.getAll("stackIds") as StackId[];
   const targetIds = formData.getAll("targetIds") as TargetId[];
@@ -32,24 +40,32 @@ export async function updateRepoConfig(formData: FormData) {
   const includeCiCheck = formData.get("includeCiCheck") === "on";
   const customRules = String(formData.get("customRules") ?? "").trim();
 
-  await saveRepoConfig({
-    ...existing,
-    stackIds,
-    targetIds,
-    mode,
-    includeCiCheck,
-    customRules: customRules.length > 0 ? customRules : undefined,
-  });
+  try {
+    await saveRepoConfig({
+      ...existing,
+      stackIds,
+      targetIds,
+      mode,
+      includeCiCheck,
+      customRules: customRules.length > 0 ? customRules : undefined,
+    });
+  } catch (err) {
+    return { kind: "error", message: err instanceof Error ? err.message : String(err) };
+  }
 
   revalidatePath("/admin/sync");
+  return { kind: "saved" };
 }
 
-export async function triggerSyncNow(formData: FormData) {
+export async function triggerSyncNow(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const key = String(formData.get("key") ?? "");
   const { installationId, repoFullName } = parseKey(key);
   const config = await getRepoConfig(installationId, repoFullName);
-  if (!config) return;
+  if (!config) return { kind: "error", message: "This repo's config wasn't found — it may have just been uninstalled." };
 
-  await syncRepo(config); // result is persisted onto the config itself (lastSyncedAt/lastPrUrl/etc) by syncRepo
+  const result = await syncRepo(config); // also persists onto the config itself (lastSyncedAt/lastPrUrl/etc)
   revalidatePath("/admin/sync");
+
+  if (result.status === "error") return { kind: "error", message: result.message };
+  return { kind: "synced", result };
 }
