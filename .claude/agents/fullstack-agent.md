@@ -220,7 +220,12 @@ selected together; none of them apply to any one stack in isolation.
 ### React + Tailwind CSS
 - When a utility-class string starts repeating across components, extract a React component before reaching for `@apply` — a shared component keeps markup and styling in sync in one place.
 
+## Team-Specific Directives
+These are this team's own rules, layered on top of everything above — they take precedence over a
+generic best practice above if the two ever conflict, since they encode something specific to how this
+team actually works that no generic stack guidance could know.
 
+- Add What's done at the end and WHY it is needed
 
 ## Universal Guardrails
 These four apply on top of the stack-specific directives above, to every language and framework this
