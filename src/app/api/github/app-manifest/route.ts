@@ -45,6 +45,12 @@ export async function GET(req: Request) {
     url: SITE_URL,
     hook_attributes: { url: `${SITE_URL}/api/github/webhook` },
     redirect_url: `${SITE_URL}/api/github/app-manifest/callback`,
+    // Both only matter if you go on to enable the multi-tenant `/dashboard` (see the callback page's
+    // optional "1b" step) — harmless to set unconditionally, since an App with no OAuth client configured
+    // just never gets a "Sign in" flow pointed at it. `request_oauth_on_install` makes GitHub offer the
+    // OAuth authorization on the same screen as the App install, one fewer step for a hosted install.
+    callback_urls: [`${SITE_URL}/api/github/oauth/callback`],
+    request_oauth_on_install: true,
     public: false,
     // Only list events that are actually opt-in and tied to a permission above. `installation` and
     // `installation_repositories` arrive automatically regardless of what's listed here — see the doc

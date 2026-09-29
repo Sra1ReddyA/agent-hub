@@ -154,6 +154,15 @@ export default function SyncPage() {
         </ol>
       </div>
 
+      <div className="card mt-4 p-6">
+        <h2 className="font-semibold text-[var(--color-ink)]">Installing on someone else&apos;s hosted instance?</h2>
+        <p className="mt-1 text-sm text-[var(--color-muted)]">
+          If you clicked an install link for an App you didn&apos;t create yourself — a hosted instance someone else runs — skip all of the above.
+          Manage your own repos and config at <Link href="/dashboard" className="underline underline-offset-2">/dashboard</Link>, signed in with
+          the same GitHub account you installed with. You&apos;ll only ever see your own repos there, never anyone else&apos;s.
+        </p>
+      </div>
+
       <section className="mt-10">
         <h2 className="text-lg font-semibold text-[var(--color-ink)]">Questions</h2>
         <div className="mt-3 divide-y divide-[var(--color-border)] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">

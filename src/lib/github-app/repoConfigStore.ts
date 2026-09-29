@@ -40,6 +40,9 @@ export type RepoConfig = {
 
 const REPO_KEY = (installationId: number, repoFullName: string) => `ah:gh:repo:${installationId}:${repoFullName}`;
 const REPO_SET_KEY = "ah:gh:repos"; // a Redis Set of every tracked repo's REPO_KEY, for the cron sweep
+// A per-installation Redis Set of REPO_KEYs — lets `/dashboard` list one tenant's repos in one round trip
+// instead of scanning REPO_SET_KEY (every tracked repo across every tenant) and filtering client-side.
+const INSTALLATION_REPO_SET_KEY = (installationId: number) => `ah:gh:repos:installation:${installationId}`;
 
 function assertKv(): Redis {
   if (!kv) throw new Error(REDIS_REQUIRED_MESSAGE);
@@ -58,13 +61,24 @@ export async function getRepoConfig(installationId: number, repoFullName: string
 export async function saveRepoConfig(config: RepoConfig): Promise<void> {
   const client = assertKv();
   const key = REPO_KEY(config.installationId, config.repoFullName);
-  await Promise.all([client.set(key, config), client.sadd(REPO_SET_KEY, key)]);
+  await Promise.all([client.set(key, config), client.sadd(REPO_SET_KEY, key), client.sadd(INSTALLATION_REPO_SET_KEY(config.installationId), key)]);
 }
 
 export async function removeRepoConfig(installationId: number, repoFullName: string): Promise<void> {
   const client = assertKv();
   const key = REPO_KEY(installationId, repoFullName);
-  await Promise.all([client.del(key), client.srem(REPO_SET_KEY, key)]);
+  await Promise.all([client.del(key), client.srem(REPO_SET_KEY, key), client.srem(INSTALLATION_REPO_SET_KEY(installationId), key)]);
+}
+
+/** One tenant's tracked repos — what `/dashboard` shows, scoped to the installation ids in that tenant's
+ * session rather than the full cross-tenant list `listAllRepoConfigs()` returns (that one's for the
+ * operator-only `/admin/sync` and the cron sweep, both of which are meant to see everything). */
+export async function listRepoConfigsForInstallation(installationId: number): Promise<RepoConfig[]> {
+  const client = assertKv();
+  const keys = await client.smembers<string[]>(INSTALLATION_REPO_SET_KEY(installationId));
+  if (keys.length === 0) return [];
+  const configs = await Promise.all(keys.map((k) => client.get<RepoConfig>(k)));
+  return configs.filter((c): c is RepoConfig => c !== null);
 }
 
 /** Every tracked repo, for the cron sweep (`/api/cron/resync`) — repos not touched by any push since
@@ -82,6 +96,7 @@ export async function removeInstallation(installationId: number): Promise<void> 
   const client = assertKv();
   const keys = await client.smembers<string[]>(REPO_SET_KEY);
   const mine = keys.filter((k) => k.startsWith(`ah:gh:repo:${installationId}:`));
-  if (mine.length === 0) return;
-  await Promise.all([...mine.map((k) => client.del(k)), client.srem(REPO_SET_KEY, ...mine)]);
+  const ops: Promise<unknown>[] = [client.del(INSTALLATION_REPO_SET_KEY(installationId))];
+  if (mine.length > 0) ops.push(...mine.map((k) => client.del(k)), client.srem(REPO_SET_KEY, ...mine));
+  await Promise.all(ops);
 }

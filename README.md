@@ -423,6 +423,7 @@ itself; the rest are entirely optional and only affect the `/admin` dashboard (s
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | No | Durable storage for `/admin`'s analytics **and** for Agent Hub Sync (below). Without these, `/admin` falls back to an in-memory store; Agent Hub Sync has no fallback and simply won't run. |
 | `GITHUB_APP_ID` / `GITHUB_APP_SLUG` / `GITHUB_APP_WEBHOOK_SECRET` / `GITHUB_APP_PRIVATE_KEY` | No | Credentials for Agent Hub Sync's GitHub App. Get these from `/sync`, not by hand — see [Agent Hub Sync](#agent-hub-sync--keep-generated-files-current-automatically). |
 | `CRON_SECRET` | No | Any random string. Authenticates Vercel's daily cron hit to `/api/cron/resync` (see `vercel.json`'s `crons` entry). |
+| `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` / `SESSION_SECRET` | No — only for a hosted (multi-tenant) instance | Enables `/dashboard`, a GitHub-login-gated view scoped to each installer's own repos. Self-hosting for just yourself? Skip these entirely and use `/admin/sync` instead. See [Multi-tenant dashboard](#multi-tenant-dashboard). |
 
 The generator itself still needs no API key, database, or secret of any kind — everything above is opt-in
 infrastructure for the site owner's own analytics and sync automation, not for the generator to function.
@@ -498,6 +499,33 @@ holds the exact repo access you granted it, under your own GitHub account — th
 between different people running this project, and no third party (including whoever's hosting this
 particular deployment) with standing access to your repos. `/sync` has more detail, including what is and
 isn't sent to the server (short answer: a handful of root-level manifest files' contents, nothing else).
+
+## Multi-tenant dashboard
+
+Everything above describes **self-hosting**: you create your own App, deploy your own instance, and
+`/admin/sync` (Basic Auth, one operator, sees every tracked repo) is all you need. `/dashboard` is the
+opposite case — running this as a **hosted product other people install into their own repos**, where no
+two installers should ever see each other's repos or config.
+
+- **Tenancy is the GitHub App installation.** `src/lib/github-app/installationStore.ts` keeps one record per
+  installation (which account it's on, its plan, how many repos it's granted vs. actually syncing);
+  `src/lib/github-app/repoConfigStore.ts`'s `RepoConfig`s were already keyed by `installationId` from the
+  start, so no data migration was needed to make this real.
+- **Access is GitHub's own OAuth, not a shared password.** `/api/github/oauth/start` → `/callback`
+  (`src/lib/auth/session.ts`) signs a cookie session from `GET /user/installations` — GitHub's own live
+  answer to "which installations of this App can this signed-in person administer," re-checked at every
+  login rather than cached anywhere. `/dashboard`'s Server Actions (`src/app/dashboard/actions.ts`)
+  re-derive the caller's installation ids from that session on every call and refuse to touch a config
+  outside it — unlike `/admin/sync`'s actions, which intentionally trust the operator with everything.
+- **Free-tier limits are real but basic.** `src/lib/github-app/plan.ts` caps a `"free"` installation at 3
+  synced repos; repos past the cap are granted access but never get a `RepoConfig`, and `/dashboard` shows
+  the gap. There's no billing integration yet (`Installation.plan` is set directly wherever you run Redis,
+  or from a future `/admin` control) — this is the tenancy/limits scaffolding a real checkout flow would
+  plug into, not a finished monetization story.
+- **Enabling it** is one optional step on the App-creation page (`/sync` → "Create your GitHub App" →
+  step "1b") after you've already created an App: paste three more env vars
+  (`GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET`/`SESSION_SECRET`) and redeploy. Skip it entirely for a
+  self-hosted single-operator setup — `/dashboard` just says it isn't enabled, and nothing else changes.
 
 ## Extending Agent Hub
 

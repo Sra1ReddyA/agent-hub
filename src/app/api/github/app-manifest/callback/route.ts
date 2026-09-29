@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { SITE_URL } from "@/lib/seo";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,8 @@ type ManifestConversion = {
   webhook_secret: string;
   html_url: string;
   name: string;
+  client_id: string;
+  client_secret: string;
 };
 
 function escapeHtml(s: string): string {
@@ -63,23 +66,43 @@ export async function GET(req: Request) {
   const redisConfigured = Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
   const cronConfigured = Boolean(process.env.CRON_SECRET);
 
+  // A fresh random value for the /dashboard session-signing secret — no reason to make the person generate
+  // their own when a cryptographically random one is one line away; it's independent of anything GitHub
+  // returned, so this is just a convenience, not something that needs to match anything server-side yet.
+  const sessionSecret = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
   const envVars: { key: string; value: string }[] = [
     { key: "GITHUB_APP_ID", value: String(app.id) },
     { key: "GITHUB_APP_SLUG", value: app.slug },
     { key: "GITHUB_APP_WEBHOOK_SECRET", value: app.webhook_secret },
     { key: "GITHUB_APP_PRIVATE_KEY", value: pemForEnvVar },
   ];
+  // Only needed to run the multi-tenant `/dashboard` (GitHub OAuth login, scoped to this App) — a
+  // self-hosted single-operator setup can skip these three and stick with /admin's Basic Auth.
+  const oauthEnvVars: { key: string; value: string }[] = [
+    { key: "GITHUB_APP_CLIENT_ID", value: app.client_id },
+    { key: "GITHUB_APP_CLIENT_SECRET", value: app.client_secret },
+    { key: "SESSION_SECRET", value: sessionSecret },
+  ];
   const envBlock = envVars.map((v) => `${v.key}=${v.value}`).join("\n");
+  const oauthEnvBlock = oauthEnvVars.map((v) => `${v.key}=${v.value}`).join("\n");
+  const allVars = [...envVars, ...oauthEnvVars]; // one shared index space so copyVar(i) below works for either group
 
-  const rows = envVars
-    .map(
-      (v, i) => `<div class="row">
+  const rowsFor = (vars: { key: string; value: string }[], startIndex: number) =>
+    vars
+      .map(
+        (v, j) => `<div class="row">
       <code class="rowkey">${escapeHtml(v.key)}</code>
-      <button class="copybtn" onclick="copyVar(${i}, this)">Copy</button>
+      <button class="copybtn" onclick="copyVar(${startIndex + j}, this)">Copy</button>
     </div>
-    <pre id="val-${i}" class="value">${escapeHtml(v.value)}</pre>`,
-    )
-    .join("\n");
+    <pre id="val-${startIndex + j}" class="value">${escapeHtml(v.value)}</pre>`,
+      )
+      .join("\n");
+
+  const rows = rowsFor(envVars, 0);
+  const oauthRows = rowsFor(oauthEnvVars, envVars.length);
 
   const html = `<!doctype html>
 <html><head><meta charSet="utf-8" /><title>Agent Hub Sync — App created</title>
@@ -110,6 +133,12 @@ export async function GET(req: Request) {
   <button class="copybtn" onclick="copyAll(this)">Copy all four as .env text</button>
   <p style="font-size: 13px; color: #57606a;">("Copy all" is for Vercel's bulk-paste .env box in project settings, if you're using that instead of adding rows one at a time — either works.)</p>
 
+  <h2><span class="stepnum">1b</span>Optional — enable the multi-tenant dashboard</h2>
+  <p>Only needed if you're running this as a <strong>hosted</strong> instance other people install into their own repos (rather than a self-hosted one just for you). It adds a GitHub-login-gated <code>/dashboard</code> where each installer sees and edits only their own repos — separate from your own <code>/admin</code>, which is Basic-Auth-protected and sees everything. Skip this block entirely for a self-hosted, single-operator setup.</p>
+  ${oauthRows}
+  <button class="copybtn" onclick="copyAllOauth(this)">Copy all three as .env text</button>
+  <p style="font-size: 13px; color: #57606a;">The App you just created already has its OAuth callback URL and "Request user authorization during installation" set — nothing more to do there. (If you're instead adding this to an App you created before this option existed: its General settings page needs <strong>"Callback URL"</strong> set to <code>${escapeHtml(SITE_URL)}/api/github/oauth/callback</code> and <strong>"Request user authorization (OAuth) during installation"</strong> checked.)</p>
+
   <h2><span class="stepnum">2</span>Confirm the other two required variables</h2>
   <p>Agent Hub Sync needs durable storage — there's no in-memory fallback for it like there is for <code>/admin</code>'s analytics. Without Redis, installs will succeed and look fine, but every sync will silently do nothing.</p>
   <div class="${redisConfigured ? "ok" : "blocker"}">
@@ -133,8 +162,9 @@ export async function GET(req: Request) {
   <p>After installing, check <a href="/admin/sync">/admin/sync</a> (behind your admin login) — the repo should show up there with a status within moments. If it doesn't, or shows an error, see the <a href="/sync">Troubleshooting section on /sync</a>.</p>
 
   <script>
-    const values = ${jsonForScript(envVars.map((v) => v.value))};
+    const values = ${jsonForScript(allVars.map((v) => v.value))};
     const envBlock = ${jsonForScript(envBlock)};
+    const oauthEnvBlock = ${jsonForScript(oauthEnvBlock)};
     function flash(btn) {
       const original = btn.textContent;
       btn.textContent = "Copied!";
@@ -142,6 +172,9 @@ export async function GET(req: Request) {
     }
     function copyVar(i, btn) {
       navigator.clipboard.writeText(values[i]).then(() => flash(btn));
+    }
+    function copyAllOauth(btn) {
+      navigator.clipboard.writeText(oauthEnvBlock).then(() => flash(btn));
     }
     function copyAll(btn) {
       navigator.clipboard.writeText(envBlock).then(() => flash(btn));

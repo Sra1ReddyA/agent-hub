@@ -18,6 +18,18 @@ export const GITHUB_APP_WEBHOOK_SECRET = process.env.GITHUB_APP_WEBHOOK_SECRET ?
 export const GITHUB_APP_SLUG = process.env.GITHUB_APP_SLUG ?? "";
 export const CRON_SECRET = process.env.CRON_SECRET ?? "";
 
+// Only needed for the multi-tenant `/dashboard` (GitHub's OAuth "Sign in" flow, scoped to this exact App)
+// — the self-hosted single-operator path (`/admin`, Basic Auth) never touches these. Both come from the
+// same manifest-conversion response as the four vars above; see app-manifest/callback/route.ts.
+export const GITHUB_APP_CLIENT_ID = process.env.GITHUB_APP_CLIENT_ID ?? "";
+export const GITHUB_APP_CLIENT_SECRET = process.env.GITHUB_APP_CLIENT_SECRET ?? "";
+export const OAUTH_CONFIGURED = Boolean(GITHUB_APP_CLIENT_ID && GITHUB_APP_CLIENT_SECRET);
+
+// Signs the `/dashboard` session cookie (see src/lib/auth/session.ts). Any random string — generate one
+// with `openssl rand -hex 32` or similar. Without it, /dashboard refuses to issue sessions rather than
+// sign them with a guessable default.
+export const SESSION_SECRET = process.env.SESSION_SECRET ?? "";
+
 export const GITHUB_APP_CONFIGURED = Boolean(GITHUB_APP_ID && GITHUB_APP_PRIVATE_KEY && GITHUB_APP_WEBHOOK_SECRET);
 
 export const GITHUB_APP_INSTALL_URL = GITHUB_APP_SLUG ? `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new` : null;
