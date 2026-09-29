@@ -54,6 +54,11 @@ export async function GET(req: Request) {
       contents: "write",
       pull_requests: "write",
       metadata: "read",
+      // GitHub gates writes to .github/workflows/* behind this permission specifically — `contents: write`
+      // alone gets a 403 "Resource not accessible by integration" the moment a tree containing a workflow
+      // path is created. Needed because the optional "Include CI enforcement check" option (repoConfigStore
+      // .includeCiCheck) generates .github/workflows/agent-guardrails.yml — see ci-compliance.ts.
+      workflows: "write",
     },
   };
 

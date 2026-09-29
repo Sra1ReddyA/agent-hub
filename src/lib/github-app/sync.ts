@@ -272,8 +272,26 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
 
     return { status, url: prUrl, changedFiles: changed.map((f) => f.path) };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = explainError(err, config);
     await recordOutcome(config, "error", message);
     return { status: "error", message };
   }
+}
+
+/** GitHub's own error text for a handful of predictable failure modes is either too generic ("Resource not
+ * accessible by integration") or points at unrelated docs — this maps the ones worth explaining to what an
+ * operator sitting on `/admin/sync` should actually go do, instead of a raw API error and a shrug. */
+function explainError(err: unknown, config: RepoConfig): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (raw.includes("Resource not accessible by integration") && config.includeCiCheck) {
+    return (
+      `${raw} — most likely the GitHub App is missing the "Workflows" permission, which is separate from ` +
+      `"Contents" and required to write .github/workflows/agent-guardrails.yml (generated because "Include ` +
+      `CI enforcement check" is on for this repo). Fix: on GitHub, go to the App's settings → Permissions & ` +
+      `webhooks → add "Workflows: Read and write" → Save. Existing installations then need to accept the ` +
+      `updated permissions (GitHub prompts for this, or visit the installation's settings page) before the ` +
+      `next sync will succeed. Turning off "Include CI enforcement check" here also avoids this entirely.`
+    );
+  }
+  return raw;
 }
