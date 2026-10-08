@@ -2,6 +2,7 @@ import { getStack, type Stack, type StackId } from "./stacks";
 import { buildModularItemFile, buildSharedRootFile, buildTargetFiles, getTarget, type AgentMeta, type TargetId } from "./targets";
 import { buildCombinedMasterAgent, buildMasterAgent, buildSharedIndexBody } from "./templates/masterAgent";
 import { buildComplianceFiles } from "./ci-compliance";
+import { KNOWLEDGE_BASE_PATH, KNOWLEDGE_SEED_MD } from "./templates/universalGuardrails";
 
 export type { GeneratedFile } from "./types";
 import type { GeneratedFile } from "./types";
@@ -64,6 +65,8 @@ export function buildBundle(stackIds: StackId[], targetIds: TargetId[], mode: Ge
   const { customRules, includeCiCheck = false } = options;
   const files: GeneratedFile[] = [];
   const seen = new Set<string>();
+  // Seed for the agent's persistent memory (see KNOWLEDGE_BASE_MD) — one empty template in every bundle.
+  pushUnique(files, seen, [{ path: KNOWLEDGE_BASE_PATH, content: KNOWLEDGE_SEED_MD }]);
 
   // A single stack has nothing to combine or modularize — both modes collapse to the same one-agent output.
   if (mode === "combined" || stacks.length === 1) {

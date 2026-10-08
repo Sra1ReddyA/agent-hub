@@ -1,6 +1,9 @@
 import type { Stack, StackId, StackRole } from "../stacks";
 import { getCrossStackGuardrails } from "../cross-stack";
 import {
+  AGENT_SAFETY_PROTOCOL_MD,
+  buildSecurityChecklistMd,
+  KNOWLEDGE_BASE_MD,
   END_OF_SESSION_REPORTING_MD,
   GIT_WORKFLOW_MD,
   OPERATIONAL_GUARDRAILS_MD,
@@ -258,7 +261,13 @@ ${customSection}
 
 ${UNIVERSAL_GUARDRAILS_MD}
 
+${buildSecurityChecklistMd([stack])}
+
 ${OPERATIONAL_GUARDRAILS_MD}
+
+${AGENT_SAFETY_PROTOCOL_MD}
+
+${KNOWLEDGE_BASE_MD}
 
 ${buildVerificationSection([stack])}
 
@@ -274,7 +283,8 @@ ${END_OF_SESSION_REPORTING_MD}
 5. Handle and log errors explicitly (Directive 9).
 6. Update \`README.md\` to reflect what changed — every time, without being asked (Directive 10).
 7. Run the Verification Workflow above before calling any change done.
-8. Close every response with the Task Summary & Application Impact table above.
+8. Read the Project Knowledge Base before starting and update it before finishing.
+9. Close every response with the Task Summary & Application Impact table above.
 
 ${versionFooter()}
 `;
@@ -365,7 +375,13 @@ ${customSection}
 
 ${UNIVERSAL_GUARDRAILS_MD}
 
+${buildSecurityChecklistMd(stacks)}
+
 ${OPERATIONAL_GUARDRAILS_MD}
+
+${AGENT_SAFETY_PROTOCOL_MD}
+
+${KNOWLEDGE_BASE_MD}
 
 ${buildVerificationSection(stacks)}
 
@@ -384,7 +400,8 @@ ${END_OF_SESSION_REPORTING_MD}
 7. Update \`README.md\` to reflect what changed — every time, without being asked (Directive 10).
 8. Run the Verification Workflow above — for whichever stack(s) the change actually touched — before
    calling any change done.
-9. Close every response with the Task Summary & Application Impact table above.
+9. Read the Project Knowledge Base before starting and update it before finishing.
+10. Close every response with the Task Summary & Application Impact table above.
 
 ${versionFooter()}
 `;
@@ -400,7 +417,7 @@ export function buildSharedIndexBody(stacks: Stack[], customRules?: string): str
   const crossStackSection = renderCrossStackSection(stacks, label);
   const customSection = renderCustomRulesSection(customRules);
 
-  return [crossStackSection, customSection, UNIVERSAL_GUARDRAILS_MD, OPERATIONAL_GUARDRAILS_MD, GIT_WORKFLOW_MD, END_OF_SESSION_REPORTING_MD, versionFooter()]
+  return [crossStackSection, customSection, UNIVERSAL_GUARDRAILS_MD, buildSecurityChecklistMd(stacks), OPERATIONAL_GUARDRAILS_MD, AGENT_SAFETY_PROTOCOL_MD, KNOWLEDGE_BASE_MD, GIT_WORKFLOW_MD, END_OF_SESSION_REPORTING_MD, versionFooter()]
     .filter(Boolean)
     .join("\n\n");
 }

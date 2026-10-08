@@ -15,7 +15,7 @@
  * template or one more supported tool — is the actual product differentiator: competitors sell a file,
  * this sells a file that tells you when to come back for a new one.
  */
-export const TEMPLATE_CONTENT_VERSION = "1.2.0";
+export const TEMPLATE_CONTENT_VERSION = "1.3.0";
 
 export type ChangelogEntry = {
   version: string;
@@ -29,6 +29,17 @@ export type ChangelogEntry = {
 
 // Newest first.
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "1.3.0",
+    date: "2026-10-08",
+    title: "Security checklist, agent safety protocol, and a project knowledge base",
+    changes: [
+      "New role-aware Security Checklist: injection, XSS, CSRF, object-level authorization, rate limiting, JWT/password/MFA, CORS, uploads, webhook signatures, SSRF, row-level security, secrets and logs — only the groups relevant to your selected stacks.",
+      "New Agent Safety Protocol: scope limits, package verification, untrusted-input isolation, secret scanning, a 5-attempt circuit breaker, and an explicit human-approval list.",
+      "New Project Knowledge Base: agents read and update a compact .agent/knowledge.md each task instead of re-scanning the repo, cutting token use; a seed file is included in every bundle.",
+    ],
+    contentChange: true,
+  },
   {
     version: "1.2.2",
     date: "2026-09-27",
