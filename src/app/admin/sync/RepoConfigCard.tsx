@@ -77,6 +77,13 @@ export function RepoConfigCard({ config: c }: { config: RepoConfig }) {
         <span className="font-mono text-sm font-semibold text-[var(--color-ink)]">{c.repoFullName}</span>
         {statusBadge(c.lastSyncStatus)}
         <span className="text-xs text-[var(--color-muted)]">checked {timeAgo(c.lastSyncedAt)}</span>
+        {c.readiness && (
+          <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-muted)]" title="Agent-Readiness Score (0–100) of the default branch">
+            readiness {c.readiness.first !== c.readiness.current ? `${c.readiness.first} → ` : ""}
+            {c.readiness.current}
+            {c.readiness.projected != null && c.readiness.projected !== c.readiness.current ? ` (→ ${c.readiness.projected} with PR)` : ""}
+          </span>
+        )}
         {c.lastSyncedContentVersion !== TEMPLATE_CONTENT_VERSION && (
           <span className="rounded-full border border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] px-2 py-0.5 text-xs text-[var(--color-accent)]">
             content v{c.lastSyncedContentVersion ?? "—"} → v{TEMPLATE_CONTENT_VERSION} available
@@ -135,6 +142,10 @@ export function RepoConfigCard({ config: c }: { config: RepoConfig }) {
             <label className="flex items-center gap-1.5 text-sm text-[var(--color-ink)]">
               <input type="checkbox" name="includeCiCheck" defaultChecked={c.includeCiCheck} />
               Include CI enforcement check
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-[var(--color-ink)]" title="Mines recurring maintainer review comments into a 'Learned from Code Review' section, proposed in the PR for you to review.">
+              <input type="checkbox" name="learnFromReviews" defaultChecked={Boolean(c.learnFromReviews)} />
+              Learn rules from code reviews
             </label>
           </div>
 

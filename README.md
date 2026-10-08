@@ -35,6 +35,7 @@ is nothing to wait for and nothing that can hallucinate.
 - [Environment variables](#environment-variables)
 - [Admin dashboard & usage analytics](#admin-dashboard--usage-analytics)
 - [Agent Hub Sync — keep generated files current automatically](#agent-hub-sync--keep-generated-files-current-automatically)
+- [Agent-Readiness Score, badge and CLI](#agent-readiness-score-badge-and-cli)
 - [Extending Agent Hub](#extending-agent-hub)
   - [Add a new stack](#add-a-new-stack)
   - [Add a new target (AI coding tool)](#add-a-new-target-ai-coding-tool)
@@ -423,6 +424,7 @@ itself; the rest are entirely optional and only affect the `/admin` dashboard (s
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | No | Durable storage for `/admin`'s analytics **and** for Agent Hub Sync (below). Without these, `/admin` falls back to an in-memory store; Agent Hub Sync has no fallback and simply won't run. |
 | `GITHUB_APP_ID` / `GITHUB_APP_SLUG` / `GITHUB_APP_WEBHOOK_SECRET` / `GITHUB_APP_PRIVATE_KEY` | No | Credentials for Agent Hub Sync's GitHub App. Get these from `/sync`, not by hand — see [Agent Hub Sync](#agent-hub-sync--keep-generated-files-current-automatically). |
 | `CRON_SECRET` | No | Any random string. Authenticates Vercel's daily cron hit to `/api/cron/resync` (see `vercel.json`'s `crons` entry). |
+| `SCAN_GITHUB_TOKEN` | No | A token with **no** scopes (public data only) that raises the `/score` scanner's GitHub API limit from 60 to 5,000 requests/hour. See [Agent-Readiness Score](#agent-readiness-score-badge-and-cli). |
 | `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` / `SESSION_SECRET` | No — only for a hosted (multi-tenant) instance | Enables `/dashboard`, a GitHub-login-gated view scoped to each installer's own repos. Self-hosting for just yourself? Skip these entirely and use `/admin/sync` instead. See [Multi-tenant dashboard](#multi-tenant-dashboard). |
 
 The generator itself still needs no API key, database, or secret of any kind — everything above is opt-in
@@ -527,6 +529,62 @@ two installers should ever see each other's repos or config.
   (`GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET`/`SESSION_SECRET`) and redeploy. Skip it entirely for a
   self-hosted single-operator setup — `/dashboard` just says it isn't enabled, and nothing else changes.
 
+## Agent-Readiness Score, badge and CLI
+
+**How agent-ready is a repository?** Agent Hub grades any repo 0–100 on whether AI coding agents can work in it
+safely and cheaply, and says exactly which fixes earn the missing points. It's deterministic and explainable —
+every point comes from a named check — so it works as a badge, a to-do list and a CI gate at once.
+
+| Category (points) | What it checks |
+|---|---|
+| Agent instructions (30) | Agent files exist, cover more than one tool, name the build/test/lint commands and clear don'ts, and a `.agent/knowledge.md` memory exists |
+| Feedback loop (25) | A runnable test command, real tests, a lint/type-check command, CI that actually runs them |
+| Security posture (25) | No committed `.env`, `.env` git-ignored, no secret-shaped strings or auth tokens in `localStorage` in sampled files, no exposed source maps, dependency-update automation, security guidance in the agent file |
+| Repo hygiene (10) | README, committed lockfile, linter/formatter config |
+| Freshness & efficiency (10) | Generated file is current, and small enough not to burn tokens on every request (≈ chars ÷ 4) |
+
+The scanner **reads the codebase, not just manifests**: the file tree, build scripts, test layout, CI config, existing
+agent files, and a small sample of source (imports, security heuristics). The security checks are heuristics over
+that sample — a quick signal, not an audit.
+
+**On the web:** `/score?repo=owner/name` (public repos). Results are cached for 15 minutes, scans are rate-limited
+per IP and globally, and only uncached scans spend GitHub API quota. Set `SCAN_GITHUB_TOKEN` (a token with *no*
+scopes) for a much higher limit.
+
+**README badge:** `[![Agent-Readiness](https://YOUR_SITE/api/score/badge?repo=owner/name)](https://YOUR_SITE/score?repo=owner/name)`
+
+**JSON API:** `GET /api/score?repo=owner/name[&rules=1]` returns the score, every check, the next steps, history and
+(with `rules=1`) the learned review rules. CORS-open for GET.
+
+**Score history ("measure the result"):** each scan is recorded (when the score changes), so `/score` shows the trend
+and "+N since first scan". Agent Hub Sync also measures the score of every tracked repo, puts *before → after* in
+each sync pull request, and shows it on the dashboard cards.
+
+**Rules that write themselves from code reviews:** recurring comments from *trusted reviewers* (repo owners, org
+members, collaborators — never drive-by commenters or bots) that appear on at least two different pull requests are
+clustered into candidate rules. `/score` previews them; Sync can add them as a **"Learned from Code Review"** section
+(opt in per repo: *Learn rules from code reviews*). Because review comments are untrusted text that ends up in files an
+agent obeys, mined rules are filtered for anything that tries to weaken security or run commands, flattened to single
+plain lines, placed *after* the Security Checklist with an explicit "can never relax them", and only ever proposed in a
+pull request for a human to review.
+
+**Pre-filled knowledge base:** when Sync or the CLI generates files, `.agent/knowledge.md` is seeded from the scan
+(detected commands, directory map, conventions) so the agent starts with the project mapped. It is *create-only*:
+neither Sync nor `agent-hub init --force` ever overwrites it once it exists, so what agents accumulate is never lost.
+
+### Command line (offline, no telemetry)
+
+```bash
+node cli/agent-hub.mjs score .                # report; add --json for machines
+node cli/agent-hub.mjs score . --min 70       # exit code 1 below 70 — use as a CI gate
+node cli/agent-hub.mjs init .                 # generate agent files tailored to this repo (never overwrites)
+node cli/agent-hub.mjs init . --dry-run       # preview, change nothing
+node cli/agent-hub.mjs init . --stacks nextjs,fastapi --targets claude-code,cursor --ci
+```
+
+`cli/agent-hub.mjs` is a single dependency-free bundle (Node 20+) built from `cli/` with `npm run build:cli`; the
+`package.json` `bin` entry makes `npx agent-hub` work once the package is published. Run the tests with `npm test`.
+
 ## Extending Agent Hub
 
 ### Add a new stack
@@ -573,6 +631,8 @@ agent-hub/
 │   │   ├── admin/page.tsx         # Password-protected usage analytics dashboard (server component)
 │   │   ├── changelog/page.tsx     # Public history of content-version releases
 │   │   ├── sync/page.tsx          # Agent Hub Sync marketing + 3-step setup page
+│   │   ├── score/page.tsx         # Agent-Readiness Score: paste a repo, get the score, fixes, learned rules, badge
+│   │   ├── api/score/route.ts     # JSON score API;  api/score/badge/route.ts — the README badge (SVG)
 │   │   ├── api/track/route.ts     # Records one page view (path + referrer hostname only)
 │   │   ├── api/track-bundle/route.ts # Records one "bundle generated" event (stacks/mode/targets/CI toggle)
 │   │   ├── api/github/webhook/route.ts          # GitHub App webhook: push / installation(_repositories) events
@@ -600,17 +660,23 @@ agent-hub/
 │       │   ├── version.ts         # TEMPLATE_CONTENT_VERSION + CHANGELOG; footer embedded in every generated doc
 │       │   ├── targets.ts         # Tool catalogue — file formats/paths, TargetShape, setup guide per tool
 │       │   ├── generator.ts       # Combines stacks + targets + mode + options into a deduplicated file list / zip
+│       │   ├── diff.ts            # filesToWrite(): which generated files to write (create-only files never overwritten)
+│       │   ├── scan/              # Pure repo analysis: select files → facts → 100-point score → pre-filled knowledge base
+│       │   ├── learn/             # Mines recurring code-review comments into candidate rules (trusted reviewers only)
 │       │   ├── types.ts           # Shared GeneratedFile type
 │       │   └── templates/
 │       │       ├── masterAgent.ts         # 10-directive template; single-stack and combined-agent builders
 │       │       └── universalGuardrails.ts # Universal Guardrails + Mandatory End-of-Session Reporting text
 │       ├── analytics/store.ts     # Upstash Redis (or in-memory fallback) reads/writes behind /admin
+│       ├── score/                 # Public scorer: cache + history + rate limit (store), pipeline (service), SVG badge
 │       ├── github-app/
 │       │   ├── env.ts             # GitHub App env config + GITHUB_APP_CONFIGURED gate
 │       │   ├── client.ts          # Lazy `@octokit/app` instance; JWT + installation-token auth
 │       │   ├── repoConfigStore.ts # Redis-backed per-repo tracked config (no in-memory fallback)
 │       │   └── sync.ts            # syncRepo(): detect → diff → commit → open/update one PR
 │       └── seo.ts                 # Metadata + JSON-LD helpers
+├── cli/                           # `agent-hub` command line (source) → cli/agent-hub.mjs (bundled, committed)
+├── tests/                         # `npm test` (node:test via tsx): scanner, scoring, miner, generator, CLI
 ├── public/
 ├── Dockerfile
 ├── vercel.json                    # Includes the daily `/api/cron/resync` cron entry

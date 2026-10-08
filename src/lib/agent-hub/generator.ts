@@ -14,7 +14,14 @@ import type { GeneratedFile } from "./types";
  * Actions workflow + guardrail-checking script that enforces a subset of the Never Allowed / Security
  * guardrails in CI — see `ci-compliance.ts` for why this is the feature that makes the bundle self-policing
  * instead of a markdown file an agent can quietly ignore. */
-export type BundleOptions = { customRules?: string; includeCiCheck?: boolean };
+export type BundleOptions = {
+  customRules?: string;
+  includeCiCheck?: boolean;
+  /** Pre-filled content for `.agent/knowledge.md` (built from a repo scan); defaults to the empty template. */
+  knowledgeSeed?: string;
+  /** Rules mined from the team's PR review comments, rendered as a lower-authority "Learned from Code Review" section. */
+  learnedRules?: string[];
+};
 
 /** "combined" (Option A, default): every selected stack merged into one unified Master Agent — plus a
  * single, tool-agnostic `.agent.md` at the repo root, since that's the one format every AI agent can fall
@@ -62,15 +69,15 @@ export function buildBundle(stackIds: StackId[], targetIds: TargetId[], mode: Ge
   const stacks = stackIds.map(getStack);
   if (stacks.length === 0 || targetIds.length === 0) return [];
 
-  const { customRules, includeCiCheck = false } = options;
+  const { customRules, includeCiCheck = false, knowledgeSeed, learnedRules } = options;
   const files: GeneratedFile[] = [];
   const seen = new Set<string>();
   // Seed for the agent's persistent memory (see KNOWLEDGE_BASE_MD) — one empty template in every bundle.
-  pushUnique(files, seen, [{ path: KNOWLEDGE_BASE_PATH, content: KNOWLEDGE_SEED_MD }]);
+  pushUnique(files, seen, [{ path: KNOWLEDGE_BASE_PATH, content: knowledgeSeed ?? KNOWLEDGE_SEED_MD, createOnly: true }]);
 
   // A single stack has nothing to combine or modularize — both modes collapse to the same one-agent output.
   if (mode === "combined" || stacks.length === 1) {
-    const body = buildCombinedMasterAgent(stacks, customRules);
+    const body = buildCombinedMasterAgent(stacks, customRules, learnedRules);
     const meta = combinedMeta(stacks);
     if (mode === "combined") pushUnique(files, seen, [{ path: UNIFIED_AGENT_PATH, content: body }]);
     for (const targetId of targetIds) pushUnique(files, seen, buildTargetFiles(targetId, meta, body));
@@ -87,12 +94,12 @@ export function buildBundle(stackIds: StackId[], targetIds: TargetId[], mode: Ge
     const shape = getTarget(targetId).shape;
 
     if (shape === "anchor-only") {
-      const body = buildCombinedMasterAgent(stacks, customRules);
+      const body = buildCombinedMasterAgent(stacks, customRules, learnedRules);
       pushUnique(files, seen, buildTargetFiles(targetId, combinedMeta(stacks), body));
       continue;
     }
 
-    const sharedBody = buildSharedIndexBody(stacks, customRules);
+    const sharedBody = buildSharedIndexBody(stacks, customRules, learnedRules);
     const root = buildSharedRootFile(targetId, metas, sharedBody);
     if (root) pushUnique(files, seen, [root]);
 

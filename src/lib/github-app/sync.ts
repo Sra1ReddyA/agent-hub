@@ -1,8 +1,15 @@
 import { buildBundle } from "../agent-hub/generator";
 import { detectStacksFromManifest } from "../agent-hub/detect";
+import { filesToWrite } from "../agent-hub/diff";
+import { analyzeCodebase } from "../agent-hub/scan/codebase";
+import { buildKnowledgeSeed } from "../agent-hub/scan/knowledgeSeed";
+import { scoreFacts } from "../agent-hub/scan/score";
+import type { RepoSnapshot } from "../agent-hub/scan/types";
 import { CHANGELOG, TEMPLATE_CONTENT_VERSION } from "../agent-hub/version";
+import { SITE_URL } from "../seo";
 import { getInstallationOctokit } from "./client";
-import { type RepoConfig, type SyncStatus, saveRepoConfig } from "./repoConfigStore";
+import { type Readiness, type RepoConfig, type SyncStatus, saveRepoConfig } from "./repoConfigStore";
+import { fetchSnapshot, learnRules, overlayFiles } from "./snapshot";
 
 type Octokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
 
@@ -71,7 +78,9 @@ async function getExistingFileContent(octokit: Octokit, owner: string, repo: str
   }
 }
 
-function summarizePrBody(config: RepoConfig, newStacks: string[], addedStacks: string[]): string {
+type PrExtras = { scoreBefore: number | null; scoreAfter: number | null; learned: string[]; knowledgeCreated: boolean };
+
+function summarizePrBody(config: RepoConfig, newStacks: string[], addedStacks: string[], extras: PrExtras): string {
   const since = config.lastSyncedContentVersion;
   const relevantEntries = since ? CHANGELOG.filter((c) => c.contentChange && isNewer(c.version, since)) : CHANGELOG.filter((c) => c.contentChange).slice(0, 1);
 
@@ -84,6 +93,9 @@ function summarizePrBody(config: RepoConfig, newStacks: string[], addedStacks: s
     "",
     `**Stacks now tracked:** ${newStacks.join(", ")}`,
     "",
+    ...(extras.scoreBefore !== null && extras.scoreAfter !== null
+      ? [`**Agent-Readiness Score:** ${extras.scoreBefore} → ${extras.scoreAfter} once merged ([what's measured](${SITE_URL}/score))`, ""]
+      : []),
     "**What changed in the generated content:**",
   ];
   if (relevantEntries.length === 0) {
@@ -93,6 +105,12 @@ function summarizePrBody(config: RepoConfig, newStacks: string[], addedStacks: s
       lines.push(`- **v${entry.version}** (${entry.date}) — ${entry.title}`);
       for (const c of entry.changes) lines.push(`  - ${c}`);
     }
+  }
+  if (extras.knowledgeCreated) {
+    lines.push("- Added `.agent/knowledge.md`, pre-filled from a scan of your repo (commands, layout, conventions). It is created once and never overwritten by later syncs — your agents keep it up to date.");
+  }
+  if (extras.learned.length > 0) {
+    lines.push("", `**Learned from your code reviews (${extras.learned.length}) — please review, these are mined automatically:**`, ...extras.learned.map((l) => `- ${l}`));
   }
   lines.push(
     "",
@@ -109,13 +127,24 @@ function summarizePrBody(config: RepoConfig, newStacks: string[], addedStacks: s
  * only ever compared stacks and `TEMPLATE_CONTENT_VERSION`, so a config-only edit (same stacks, same
  * content version) short-circuited before `buildBundle` ever saw the new targets/mode/rules. `targetIds`
  * is sorted first so reordering the same set of checkboxes doesn't count as a change. */
-function configFingerprint(config: Pick<RepoConfig, "mode" | "targetIds" | "customRules" | "includeCiCheck">): string {
+function configFingerprint(config: Pick<RepoConfig, "mode" | "targetIds" | "customRules" | "includeCiCheck">, learned: string[] = []): string {
   return JSON.stringify({
     mode: config.mode,
     targetIds: [...config.targetIds].sort(),
     customRules: config.customRules ?? "",
     includeCiCheck: config.includeCiCheck,
+    // Only present when rules were actually learned, so repos that never opt in keep their existing fingerprint
+    // (and don't get a spurious PR when this field was introduced).
+    ...(learned.length > 0 ? { learned } : {}),
   });
+}
+
+const READINESS_REFRESH_MS = 24 * 60 * 60 * 1000;
+
+/** Measures the repo's Agent-Readiness Score from a snapshot and folds it into the stored tracking record. */
+function nextReadiness(prev: Readiness | null | undefined, snapshot: RepoSnapshot, projected: number | null): Readiness {
+  const current = scoreFacts(analyzeCodebase(snapshot)).total;
+  return { first: prev?.first ?? current, current, projected, at: Date.now() };
 }
 
 function isNewer(a: string, b: string): boolean {
@@ -167,30 +196,65 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
       return { status: "no-manifest-signal" };
     }
 
-    const currentFingerprint = configFingerprint(config);
+    // Opt-in: recurring maintainer review comments → rules. Mined BEFORE the up-to-date check so a newly
+    // recurring review point (or turning the option off) counts as a change worth a PR.
+    const learned = config.learnFromReviews ? await learnRules(octokit, owner, repo) : [];
+
+    const currentFingerprint = configFingerprint(config, learned);
     const versionUnchanged = config.lastSyncedContentVersion === TEMPLATE_CONTENT_VERSION;
     const stacksUnchanged = addedStacks.length === 0;
     const configUnchanged = config.lastSyncedConfigFingerprint === currentFingerprint;
     if (versionUnchanged && stacksUnchanged && configUnchanged) {
-      await recordOutcome(config, "up-to-date", null);
+      // Nothing to sync — but refresh the readiness measurement at most once a day, so the dashboard shows the
+      // real effect of a merged PR without re-reading the whole repo on every push.
+      let readiness: Readiness | undefined;
+      if (!config.readiness || Date.now() - config.readiness.at > READINESS_REFRESH_MS) {
+        try {
+          const prev = config.readiness;
+          const measured = nextReadiness(prev, await fetchSnapshot(octokit, owner, repo, config.defaultBranch), null);
+          readiness = prev?.projected != null && prev.projected > measured.current ? { ...measured, projected: prev.projected } : measured;
+        } catch {
+          readiness = undefined; // measurement is a nice-to-have; never let it affect the sync outcome
+        }
+      }
+      await recordOutcome(config, "up-to-date", null, readiness ? { readiness } : {});
       return { status: "up-to-date" };
     }
+
+    // Read the whole repo once (tree + a few dozen files), not just root manifests: it pre-fills the agent's
+    // knowledge file and lets us report the readiness score before/after. Failure just means a plainer PR.
+    let snapshot: RepoSnapshot | null = null;
+    try {
+      snapshot = await fetchSnapshot(octokit, owner, repo, config.defaultBranch);
+    } catch {
+      snapshot = null;
+    }
+    const knowledgeSeed = snapshot ? buildKnowledgeSeed(analyzeCodebase(snapshot)) : undefined;
 
     const files = buildBundle(mergedStacks, config.targetIds, config.mode, {
       customRules: config.customRules,
       includeCiCheck: config.includeCiCheck,
+      knowledgeSeed,
+      learnedRules: learned,
     });
 
     // Diff against what's actually on the default branch right now — only files that actually changed
     // go into the commit, so the PR's diff is exactly what a human would expect, not a full rewrite.
+    // Create-only files (the agent-maintained knowledge base) are written when missing and NEVER overwritten —
+    // otherwise every sync would wipe what the agents had learned.
     const existing = await Promise.all(files.map((f) => getExistingFileContent(octokit, owner, repo, f.path, config.defaultBranch)));
-    const changed = files.filter((f, i) => existing[i] !== f.content);
+    const changed = filesToWrite(files, existing);
+
+    const before = snapshot ? scoreFacts(analyzeCodebase(snapshot)).total : null;
+    const after = snapshot ? scoreFacts(analyzeCodebase(overlayFiles(snapshot, changed))).total : null;
+    const readiness: Readiness | undefined = snapshot && before !== null ? { first: config.readiness?.first ?? before, current: before, projected: changed.length > 0 ? after : null, at: Date.now() } : undefined;
 
     if (changed.length === 0) {
       await recordOutcome(config, "up-to-date", null, {
         stackIds: mergedStacks,
         lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION,
         lastSyncedConfigFingerprint: currentFingerprint,
+        ...(readiness ? { readiness } : {}),
       });
       return { status: "up-to-date" };
     }
@@ -234,7 +298,12 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
       await octokit.request("POST /repos/{owner}/{repo}/git/refs", { owner, repo, ref: `refs/heads/${SYNC_BRANCH}`, sha: commit.sha });
     }
 
-    const prBody = summarizePrBody(config, mergedStacks, addedStacks);
+    const prBody = summarizePrBody(config, mergedStacks, addedStacks, {
+      scoreBefore: before,
+      scoreAfter: after,
+      learned,
+      knowledgeCreated: changed.some((f) => f.createOnly),
+    });
     const openPrs = await octokit.request("GET /repos/{owner}/{repo}/pulls", {
       owner,
       repo,
@@ -268,6 +337,7 @@ export async function syncRepo(config: RepoConfig): Promise<SyncResult> {
       lastSyncedContentVersion: TEMPLATE_CONTENT_VERSION,
       lastSyncedConfigFingerprint: currentFingerprint,
       lastPrUrl: prUrl,
+      ...(readiness ? { readiness } : {}),
     });
 
     return { status, url: prUrl, changedFiles: changed.map((f) => f.path) };

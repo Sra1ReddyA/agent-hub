@@ -21,6 +21,11 @@ export const REDIS_REQUIRED_MESSAGE =
  * store module has no dependency on the sync engine — just the shape of what it reports. */
 export type SyncStatus = "up-to-date" | "no-manifest-signal" | "pr-opened" | "pr-updated" | "error";
 
+/** Agent-Readiness Score tracking for a repo (see `agent-hub/scan/score.ts`). `first` is the score the first time
+ * Sync measured it, `current` the latest measurement of what's actually on the default branch, and `projected`
+ * what the open sync PR would bring it to — the before/after that shows whether the tool is earning its keep. */
+export type Readiness = { first: number; current: number; projected: number | null; at: number };
+
 export type RepoConfig = {
   installationId: number;
   repoFullName: string; // "owner/repo"
@@ -30,6 +35,9 @@ export type RepoConfig = {
   targetIds: TargetId[];
   customRules?: string;
   includeCiCheck: boolean;
+  /** Opt-in: mine recurring maintainer review comments into a "Learned from Code Review" section. */
+  learnFromReviews?: boolean;
+  readiness?: Readiness | null;
   lastSyncedContentVersion: string | null; // Agent Hub TEMPLATE_CONTENT_VERSION at last successful sync
   lastSyncedConfigFingerprint: string | null; // hash of {mode, targetIds, customRules, includeCiCheck} at last sync — see sync.ts's configFingerprint()
   lastSyncedAt: number | null; // last time syncRepo() ran at all, whatever the outcome — the admin page's proof-of-life

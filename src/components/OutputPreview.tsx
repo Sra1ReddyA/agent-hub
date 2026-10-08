@@ -314,6 +314,12 @@ export function OutputPreview({
           </button>
         </div>
 
+        {files.some((f) => f.createOnly) && (
+          <p className="mt-3 text-xs text-[var(--color-muted)]">
+            <span className="font-mono">.agent/knowledge.md</span> is your agents&apos; memory. If your project already has one, keep yours — don&apos;t extract this over it.
+          </p>
+        )}
+
         <div className="mt-4 grid gap-4 md:grid-cols-[260px_1fr]">
           <nav className="flex gap-1.5 overflow-x-auto md:flex-col md:overflow-visible">
             {files.map((f) => (

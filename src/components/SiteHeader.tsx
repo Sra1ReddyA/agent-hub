@@ -13,6 +13,9 @@ export function SiteHeader() {
           <Link href="/guides" className="btn-ghost !px-3">
             Guides
           </Link>
+          <Link href="/score" className="btn-ghost !px-3">
+            Score
+          </Link>
           <Link href="/changelog" className="btn-ghost !px-3">
             Changelog
           </Link>

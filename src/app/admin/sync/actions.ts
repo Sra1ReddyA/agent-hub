@@ -38,6 +38,7 @@ export async function updateRepoConfig(_prev: ActionState, formData: FormData): 
   const targetIds = formData.getAll("targetIds") as TargetId[];
   const mode = (formData.get("mode") as GenerationMode) || existing.mode;
   const includeCiCheck = formData.get("includeCiCheck") === "on";
+  const learnFromReviews = formData.get("learnFromReviews") === "on";
   const customRules = String(formData.get("customRules") ?? "").trim();
 
   try {
@@ -47,6 +48,7 @@ export async function updateRepoConfig(_prev: ActionState, formData: FormData): 
       targetIds,
       mode,
       includeCiCheck,
+      learnFromReviews,
       customRules: customRules.length > 0 ? customRules : undefined,
     });
   } catch (err) {

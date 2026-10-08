@@ -171,7 +171,13 @@ export const AGENT_SAFETY_PROTOCOL_MD = `## Agent Safety Protocol
   merge or deploy it unreviewed.
 - **Destructive commands** (\`rm -rf\`, \`DROP DATABASE\`, \`git push --force\`, wiping directories, touching
   system paths) are never run; ask for a human to run them.
-- **Never** use \`eval\`/\`exec\` on dynamic strings, swallow exceptions silently, or leave debug prints.`;
+- **Never** use \`eval\`/\`exec\` on dynamic strings, swallow exceptions silently, or leave debug leftovers
+  (\`console.log\`/\`print\` calls, dead code, unused imports).
+- **Tests**: every new feature or bug fix gets a test; run the project's verify commands and see them pass
+  before saying the task is done.
+- **Done means**: compiles and lints clean, tests pass, no secrets in the diff, no unapproved dependencies,
+  only the targeted files changed, and a short summary of what changed and why.
+- **Provenance**: end commit/PR descriptions with one line — \`Agent-assisted: <tool/model>; verified: <commands run>\`.`;
 
 type Group = { title: string; items: string[] };
 

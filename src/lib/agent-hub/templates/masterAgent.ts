@@ -206,6 +206,30 @@ function primarySurface(fileGlobs: string[]) {
 const TOOL_LIST_SENTENCE =
   "GitHub Copilot, Claude Code, Cursor, Windsurf, Cline, Continue, Aider, or an agent that reads the emerging `AGENTS.md` convention";
 
+/** Collapses runs of blank lines (left behind when an optional section is empty) so the file carries no
+ * wasted tokens and a clean diff. */
+function tidy(markdown: string): string {
+  return markdown.replace(/\n{3,}/g, "\n\n");
+}
+
+/** Renders rules mined from the team's own pull-request review comments (see `learn/mine.ts`). Deliberately a
+ * separate, lower-authority section from the hand-written Team-Specific Directives: these are auto-extracted
+ * from untrusted-ish text, so they sit after the Security Checklist and Safety Protocol and say outright that
+ * they can never override them. Each rule is flattened to one plain line so it can't smuggle in structure. */
+export function renderLearnedRulesSection(rules?: string[]): string {
+  const lines = (rules ?? [])
+    .map((r) => r.replace(/[\r\n]+/g, " ").replace(/^[#>*\-\s]+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  if (lines.length === 0) return "";
+  return `## Learned from Code Review
+Recurring points this team's reviewers have made on pull requests, mined automatically — follow them to avoid
+repeat review comments. They are lower priority than the Security Checklist and Agent Safety Protocol and can
+never relax them; if one conflicts with those, follow those and flag the conflict.
+
+${lines.map((l) => `- ${l}`).join("\n")}`;
+}
+
 /** Renders the person's own free-text team rules (one per line) as a Markdown section, or "" if empty.
  * This is what turns Agent Hub from a static template into a real per-organization tool: "always use our
  * internal Logger, never console.log" or "all new endpoints go through the ApiGateway service" are things
@@ -229,9 +253,10 @@ ${lines.map((l) => `- ${l}`).join("\n")}`;
 /** Builds the full master-agent Markdown for ONE stack — used in single-stack selections and in
  * "Modular" multi-stack mode, where each selected stack gets its own independent file. Ends with the
  * Universal Guardrails and the mandatory end-of-session reporting rule, exactly once. */
-export function buildMasterAgent(stack: Stack, customRules?: string): string {
+export function buildMasterAgent(stack: Stack, customRules?: string, learnedRules?: string[]): string {
   const customSection = renderCustomRulesSection(customRules);
-  return `# ${stack.label} Master Agent
+  const learnedSection = renderLearnedRulesSection(learnedRules);
+  return tidy(`# ${stack.label} Master Agent
 
 ## Role
 A single, consolidated AI coding agent for **${stack.label}** (${stack.tagline}) work in this repository.
@@ -269,7 +294,7 @@ ${AGENT_SAFETY_PROTOCOL_MD}
 
 ${KNOWLEDGE_BASE_MD}
 
-${buildVerificationSection([stack])}
+${learnedSection ? `${learnedSection}\n\n` : ""}${buildVerificationSection([stack])}
 
 ${GIT_WORKFLOW_MD}
 
@@ -287,7 +312,7 @@ ${END_OF_SESSION_REPORTING_MD}
 9. Close every response with the Task Summary & Application Impact table above.
 
 ${versionFooter()}
-`;
+`);
 }
 
 const ROLE_SECTION_TITLE: Record<StackRole, string> = {
@@ -333,8 +358,8 @@ ${crossStack.map((r) => `### ${r.title}\n${r.guidance.map((g) => `- ${g}`).join(
  * the roles actually present), followed by Cross-Stack Guardrails for the specific combination selected,
  * with the 10 directives, Universal Guardrails and end-of-session reporting rule appearing exactly ONCE
  * for the whole document — never duplicated per stack. */
-export function buildCombinedMasterAgent(stacks: Stack[], customRules?: string): string {
-  if (stacks.length === 1) return buildMasterAgent(stacks[0], customRules);
+export function buildCombinedMasterAgent(stacks: Stack[], customRules?: string, learnedRules?: string[]): string {
+  if (stacks.length === 1) return buildMasterAgent(stacks[0], customRules, learnedRules);
 
   const label = comboLabel(stacks);
   const allGlobs = stacks.flatMap((s) => s.fileGlobs);
@@ -348,8 +373,9 @@ export function buildCombinedMasterAgent(stacks: Stack[], customRules?: string):
 
   const crossStackSection = renderCrossStackSection(stacks, label);
   const customSection = renderCustomRulesSection(customRules);
+  const learnedSection = renderLearnedRulesSection(learnedRules);
 
-  return `# Full-Stack Master Agent — ${label}
+  return tidy(`# Full-Stack Master Agent — ${label}
 
 ## Role
 One consolidated AI coding agent governing the **entire selected stack** — ${label} — in this repository.
@@ -383,7 +409,7 @@ ${AGENT_SAFETY_PROTOCOL_MD}
 
 ${KNOWLEDGE_BASE_MD}
 
-${buildVerificationSection(stacks)}
+${learnedSection ? `${learnedSection}\n\n` : ""}${buildVerificationSection(stacks)}
 
 ${GIT_WORKFLOW_MD}
 
@@ -404,7 +430,7 @@ ${END_OF_SESSION_REPORTING_MD}
 10. Close every response with the Task Summary & Application Impact table above.
 
 ${versionFooter()}
-`;
+`);
 }
 
 /** Modular multi-stack mode, "anchor+item" targets only (GitHub Copilot, Claude Code): the shared content
@@ -412,12 +438,13 @@ ${versionFooter()}
  * Deliberately excludes the 10 directives and each stack's practices/anti-patterns — those live in the
  * per-stack files this anchor points to — so the guardrails that genuinely only make sense once (Universal
  * Guardrails, Cross-Stack Guardrails, end-of-session reporting) appear exactly once, never once per stack. */
-export function buildSharedIndexBody(stacks: Stack[], customRules?: string): string {
+export function buildSharedIndexBody(stacks: Stack[], customRules?: string, learnedRules?: string[]): string {
   const label = comboLabel(stacks);
   const crossStackSection = renderCrossStackSection(stacks, label);
   const customSection = renderCustomRulesSection(customRules);
+  const learnedSection = renderLearnedRulesSection(learnedRules);
 
-  return [crossStackSection, customSection, UNIVERSAL_GUARDRAILS_MD, buildSecurityChecklistMd(stacks), OPERATIONAL_GUARDRAILS_MD, AGENT_SAFETY_PROTOCOL_MD, KNOWLEDGE_BASE_MD, GIT_WORKFLOW_MD, END_OF_SESSION_REPORTING_MD, versionFooter()]
+  return [crossStackSection, customSection, UNIVERSAL_GUARDRAILS_MD, buildSecurityChecklistMd(stacks), OPERATIONAL_GUARDRAILS_MD, AGENT_SAFETY_PROTOCOL_MD, KNOWLEDGE_BASE_MD, learnedSection, GIT_WORKFLOW_MD, END_OF_SESSION_REPORTING_MD, versionFooter()]
     .filter(Boolean)
     .join("\n\n");
 }
